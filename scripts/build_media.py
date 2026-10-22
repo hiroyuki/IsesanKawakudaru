@@ -9,12 +9,14 @@
   media.json      全写真・動画のメタデータ(時刻 JST、位置、補完フラグ、カメラ、サイズ)
   media/thumb/    長辺 400px のサムネイル (JPEG)
   media/web/      長辺 1600px の閲覧用 (JPEG)
+  media/video/    動画の Web 再生用 (H.264 720p MP4、約 2.5Mbps)
   動画はポスターフレーム(1 秒目)を同じ 2 サイズで書き出す。
 """
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import math
 import os
 import subprocess
@@ -30,6 +32,8 @@ PHOTO_EXT = {".jpg", ".jpeg"}
 VIDEO_EXT = {".mp4", ".mov"}
 THUMB_PX = 400
 WEB_PX = 1600
+VIDEO_HEIGHT = 720
+VIDEO_KBPS = 2500
 BBOX = (38.0, 140.5, 40.0, 142.0)  # lat0, lon0, lat1, lon1  (遠野〜石巻の外は外れ値扱い)
 SPIKE_KM = 0.5  # 前後の両方からこれ以上離れた場所へ飛んで戻る点は GPS スパイクとして捨てる
 SPIKE_MAX_RUN = 3  # 連続して飛んでいる点をまとめて捨てる最大数
@@ -77,11 +81,23 @@ def read_video(path: str) -> dict:
     info = ffprobe(path)
     fmt = info["format"]
     vs = next((s for s in info["streams"] if s.get("codec_type") == "video"), {})
-    ct = fmt.get("tags", {}).get("creation_time") or vs.get("tags", {}).get("creation_time")
+    tags = fmt.get("tags", {})
     t = None
-    if ct:
-        # カメラは現地時刻(JST)を Z 付きで書いているので、そのまま JST として読む
-        t = datetime.strptime(ct[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=JST)
+    # 時刻の扱いはカメラごとに違う:
+    #  - iPhone: com.apple.quicktime.creationdate にオフセット付き(+0900)の現地時刻がある → それを使う
+    #  - Canon XC10 (MVI_) / GoPro (GOPR, Gnnnnnnn): creation_time は Z 付きだが実体は現地時刻(JST)
+    #  - それ以外(UUID 名の .mov など、iPhone から書き出したもの): creation_time は本当に UTC → +9h
+    cd = tags.get("com.apple.quicktime.creationdate")
+    ct = tags.get("creation_time") or vs.get("tags", {}).get("creation_time")
+    name = os.path.basename(path).upper()
+    if cd:
+        t = datetime.strptime(cd[:24], "%Y-%m-%dT%H:%M:%S%z").astimezone(JST)
+    elif ct:
+        naive = datetime.strptime(ct[:19], "%Y-%m-%dT%H:%M:%S")
+        if name.startswith("MVI_") or name.startswith("GOPR") or re.match(r"^G\d{7}\.", name):
+            t = naive.replace(tzinfo=JST)
+        else:
+            t = naive.replace(tzinfo=timezone.utc).astimezone(JST)
     w, h = int(vs.get("width", 0)), int(vs.get("height", 0))
     rot = 0
     for sd in vs.get("side_data_list", []) or []:
@@ -214,12 +230,31 @@ def make_images(job: tuple[str, str, str, str]) -> str | None:
         return f"{src}: {e}"
 
 
+def make_video(job: tuple[str, str]) -> str | None:
+    """Web 再生用に 720p H.264 へ変換(Mac の VideoToolbox を使う。無ければ libx264)。"""
+    src, out = job
+    if os.path.exists(out):
+        return None
+    tmp = out + ".part.mp4"
+    base = ["ffmpeg", "-v", "error", "-y", "-i", src, "-vf", f"scale=-2:'min({VIDEO_HEIGHT},ih)'",
+            "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-pix_fmt", "yuv420p"]
+    for venc in (["-c:v", "h264_videotoolbox", "-b:v", f"{VIDEO_KBPS}k"], ["-c:v", "libx264", "-preset", "fast", "-crf", "23"]):
+        r = subprocess.run(base + venc + [tmp], capture_output=True, text=True)
+        if r.returncode == 0 and os.path.exists(tmp):
+            os.replace(tmp, out)
+            return None
+    return f"{src}: {r.stderr.strip()[-200:]}"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", required=True)
     ap.add_argument("--media", required=True)
     ap.add_argument("--json", required=True)
+    ap.add_argument("--exclude", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "exclude.json"),
+                    help="除外する id のリスト(web/curate.html で作る)。hidden: true を付ける")
     ap.add_argument("--no-thumbs", action="store_true")
+    ap.add_argument("--no-video", action="store_true", help="動画の 720p 変換を省く")
     ap.add_argument("--workers", type=int, default=os.cpu_count())
     a = ap.parse_args()
 
@@ -242,6 +277,11 @@ def main() -> None:
         it["gps"] = "exif" if it["lat"] is not None else None
         items.append(it)
 
+    excluded: set[str] = set()
+    if os.path.exists(a.exclude):
+        with open(a.exclude) as f:
+            excluded = set(json.load(f).get("ids", []))
+
     dropped = clean_gps(items)
     interp = interpolate(items)
     items.sort(key=lambda x: (x["time"] or datetime.max.replace(tzinfo=JST), x["file"]))
@@ -260,14 +300,19 @@ def main() -> None:
             rec["duration"] = it["duration"]
         if it.get("gps_dropped"):
             rec["gps_dropped"] = it["gps_dropped"]
+        if it["id"] in excluded:
+            rec["hidden"] = True  # 選別で除外(サイトに出さない・R2 に上げない)。ファイルは残す
         out.append(rec)
 
     os.makedirs(os.path.dirname(a.json), exist_ok=True)
     with open(a.json, "w") as f:
         json.dump({"generated": datetime.now(JST).isoformat(timespec="seconds"), "items": out}, f, ensure_ascii=False, separators=(",", ":"))
     located = sum(1 for r in out if r["lat"] is not None)
-    print(f"items={len(out)} photos={sum(1 for r in out if r['type']=='photo')} videos={sum(1 for r in out if r['type']=='video')} "
+    print(f"hidden={sum(1 for r in out if r.get('hidden'))} "
+          f"items={len(out)} photos={sum(1 for r in out if r['type']=='photo')} videos={sum(1 for r in out if r['type']=='video')} "
           f"located={located} interpolated={interp} dropped_gps={dropped} no_position={len(out)-located}")
+
+    # 除外した素材も生成物は作る(選別ページで見直せるように)。除外は hidden フラグ(サイト)と R2 への転送時に効かせる
 
     if a.no_thumbs:
         return
@@ -285,6 +330,22 @@ def main() -> None:
             if i % 500 == 0:
                 print(f"images {i}/{len(jobs)}", file=sys.stderr)
     print(f"images done, errors={errors}")
+
+    if a.no_video:
+        return
+    vdir = os.path.join(a.media, "video")
+    os.makedirs(vdir, exist_ok=True)
+    vjobs = [(os.path.join(a.src, it["file"]), os.path.join(vdir, it["id"] + ".mp4")) for it in items if it["type"] == "video"]
+    verrors = 0
+    # ハードウェアエンコーダは同時実行数が少ないほうが速いので 2 並列
+    with ProcessPoolExecutor(max_workers=2) as ex:
+        for i, err in enumerate(ex.map(make_video, vjobs), 1):
+            if err:
+                verrors += 1
+                print(err, file=sys.stderr)
+            if i % 25 == 0:
+                print(f"videos {i}/{len(vjobs)}", file=sys.stderr)
+    print(f"videos done, errors={verrors}")
 
 
 if __name__ == "__main__":

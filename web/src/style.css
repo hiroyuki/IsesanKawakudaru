@@ -7,30 +7,30 @@
   --line: #d9d4c7;
   --river: #2a6f97;
   --track: #d93e2c;
+  --video: #7a3fa0;
   --photo-bg: #101316;
-  --display: "Shippori Mincho", "Hiragino Mincho ProN", "Yu Mincho", serif;
-  --body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", sans-serif;
+  /* 書体は游ゴシック(ユーザー指定)。iPhone には無いのでヒラギノ、Android は Web フォントの Zen Kaku Gothic に落ちる */
+  --body: "Yu Gothic", "YuGothic", "游ゴシック体", "游ゴシック", "Hiragino Sans", "Zen Kaku Gothic New", sans-serif;
+  --display: var(--body);
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #161b1f; --surface: #1f262c; --fg: #e8e4da; --muted: #a0a9b1; --line: #343d45;
-    --river: #7cb8d9; --track: #f0654f; color-scheme: dark;
+    --river: #7cb8d9; --track: #f0654f; --video: #b98ad9; color-scheme: dark;
   }
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.5; overscroll-behavior: none; }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-weight: 500; font-size: 15px; line-height: 1.5; overscroll-behavior: none; }
 #app {
   height: 100%; display: grid;
   padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 /* 3 つの見え方。grid の行は上から 写真 / スライダー / 地図 の順(map 状態だけスライダーを下端に) */
 #app[data-view="split"] { grid-template-rows: 1fr auto 1fr; }
-#app[data-view="map"] { grid-template-rows: 1fr auto; } /* 写真は display:none なので 2 行 */
-#app[data-view="map"] #photo { display: none; }
-#app[data-view="map"] #mapwrap { order: 1; }
-#app[data-view="map"] #scrub { order: 2; border-bottom: 0; }
+#app[data-view="map"] { grid-template-rows: 1fr; } /* 地図だけ。写真とスライダーは出さない */
+#app[data-view="map"] #photo, #app[data-view="map"] #scrub { display: none; }
 #app[data-view="photo"] { grid-template-rows: 1fr auto; } /* 地図は display:none なので 2 行 */
 #app[data-view="photo"] #mapwrap { display: none; }
 #app[data-view="photo"] #scrub { border-bottom: 0; }
@@ -39,6 +39,33 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-s
 #photo { position: relative; background: var(--photo-bg); overflow: hidden; min-height: 0; }
 #photo-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--photo-bg); user-select: none; -webkit-user-select: none; cursor: zoom-in; }
 #app[data-view="photo"] #photo-img { cursor: default; }
+#photo-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--photo-bg); }
+#photo-video[hidden] { display: none; }
+#photo[data-type="video"] #photo-img { display: none; }
+#video-ui[hidden] { display: none; }
+/* 中央の再生ボタン。再生中は消える */
+#btn-play {
+  position: absolute; z-index: 2; left: 50%; top: 50%; width: 72px; height: 72px; margin: -36px 0 0 -36px;
+  border-radius: 50%; border: 2px solid rgba(255,255,255,.8); background: rgba(0,0,0,.45); cursor: pointer;
+  backdrop-filter: blur(3px);
+}
+#btn-play::after {
+  content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-40%, -50%);
+  border-left: 24px solid #fff; border-top: 15px solid transparent; border-bottom: 15px solid transparent;
+}
+#photo[data-playing="1"] #btn-play { display: none; }
+/* 進行バー(写真の下端) */
+#video-bar { position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(255,255,255,.25); cursor: pointer; }
+#video-bar::before { content: ""; position: absolute; left: 0; right: 0; top: -12px; bottom: -4px; } /* タップしやすく */
+#video-progress { height: 100%; width: 0; background: var(--video); }
+#btn-mute {
+  position: absolute; z-index: 2; right: calc(56px + max(8px, env(safe-area-inset-right, 0px))); bottom: 14px;
+  width: 36px; height: 36px; border-radius: 50%; border: 1px solid rgba(255,255,255,.35); background: rgba(0,0,0,.5); cursor: pointer;
+}
+#btn-mute::before { content: "♪"; color: #fff; font-size: 1rem; line-height: 1; }
+#btn-mute[aria-pressed="true"]::before { content: "♪"; text-decoration: line-through; opacity: .6; }
+#photo[data-type="video"] #photo-video { cursor: pointer; }
+#photo[data-type="video"] #photo-caption { padding-bottom: 14px; }
 #btn-close {
   position: absolute; z-index: 3; top: 8px; right: max(8px, env(safe-area-inset-right, 0px));
   width: 40px; height: 40px; border: 0; border-radius: 50%; cursor: pointer;
@@ -46,7 +73,7 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-s
 }
 #btn-close:focus-visible { outline: 2px solid #fff; }
 #title {
-  position: absolute; z-index: 2; top: 44px; left: max(12px, env(safe-area-inset-left, 0px)); margin: 0; pointer-events: none;
+  position: absolute; z-index: 2; top: 80px; left: max(12px, env(safe-area-inset-left, 0px)); margin: 0; pointer-events: none;
   font-family: var(--display); font-size: 1rem; font-weight: 700; line-height: 1.2; color: var(--fg);
   text-shadow: 0 1px 2px var(--bg), 0 0 6px var(--bg);
 }
@@ -100,6 +127,17 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-s
   background: var(--river); border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); box-sizing: border-box;
 }
 
+/* ---- ホバーのサムネイル ---- */
+#hover {
+  position: fixed; z-index: 5; left: 0; top: 0; width: 180px; pointer-events: none;
+  background: var(--surface); color: var(--fg); border-radius: 8px; padding: 4px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.3); will-change: transform;
+}
+#hover[hidden] { display: none; }
+#hover img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 5px; background: #ccc; }
+#hover[data-type="video"] img { outline: 2px solid var(--video); outline-offset: -2px; }
+#hover-time { font-family: var(--display); font-size: 0.85rem; padding: 4px 2px 0; font-variant-numeric: tabular-nums; text-align: center; }
+
 /* ---- 下半分: 地図 ---- */
 #mapwrap { position: relative; min-height: 0; }
 #map { position: absolute; inset: 0; }
@@ -108,6 +146,17 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-s
   display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px;
 }
 #days::-webkit-scrollbar { display: none; }
+#kinds { position: absolute; z-index: 2; top: 44px; left: max(10px, env(safe-area-inset-left, 0px)); display: flex; gap: 6px; }
+#kinds .chip { font-size: 0.78rem; padding: 3px 10px; }
+#kinds .chip b { font-weight: 500; opacity: .75; margin-left: 2px; }
+/* 凡例を兼ねる: 写真 = 赤い軌跡、動画 = 紫の点 */
+#kinds .chip[data-kind="photo"]::before, #kinds .chip[data-kind="video"]::before {
+  content: ""; display: inline-block; vertical-align: middle; margin: -2px 5px 0 0;
+}
+#kinds .chip[data-kind="photo"]::before { width: 14px; height: 3px; border-radius: 2px; background: var(--track); }
+#kinds .chip[data-kind="video"]::before { width: 9px; height: 9px; border-radius: 50%; background: var(--video); border: 1.5px solid #fff; box-sizing: border-box; }
+#kinds .chip[aria-pressed="true"][data-kind="photo"]::before { background: #fff; }
+#kinds .chip[aria-pressed="true"][data-kind="video"]::before { border-color: #fff; }
 .chip {
   flex: 0 0 auto; font: inherit; font-size: 0.85rem; padding: 4px 11px; border-radius: 999px;
   border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer;
@@ -121,4 +170,3 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-s
 }
 #toolbar button { font: inherit; font-size: 0.85rem; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
 #toolbar button[aria-pressed="true"] { background: var(--river); border-color: var(--river); color: #fff; }
-#count { font-size: 0.72rem; color: var(--muted); background: color-mix(in srgb, var(--surface) 85%, transparent); padding: 2px 8px; border-radius: 6px; font-variant-numeric: tabular-nums; }

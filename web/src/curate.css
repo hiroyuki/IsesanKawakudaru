@@ -1,0 +1,24 @@
+/* 選別ページ(開発用)。密度優先の一覧 */
+:root { color-scheme: light; --bg: #f6f4ee; --fg: #1f2a33; --muted: #5d6b76; --line: #d9d4c7; --accent: #2a6f97; --warn: #c7731f; --no: #d93e2c; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 500 14px/1.5 "Yu Gothic", "YuGothic", "游ゴシック体", "Hiragino Sans", sans-serif; }
+#bar { position: sticky; top: 0; z-index: 2; background: #fff; border-bottom: 1px solid var(--line); padding: 10px 16px; }
+#bar h1 { margin: 0 0 6px; font-size: 1.1rem; }
+#bar h1 small { font-weight: 400; color: var(--muted); font-size: 0.8rem; margin-left: 8px; }
+#tools { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; font-size: 0.9rem; }
+#tools button { font: inherit; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+#tools #btn-save { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+#stat, #saved { color: var(--muted); }
+#grid { padding: 12px 16px 60px; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+#grid h2 { grid-column: 1 / -1; margin: 18px 0 2px; font-size: 1rem; color: var(--accent); border-bottom: 1px solid var(--line); }
+#grid h2.cand { color: var(--warn); }
+.card { margin: 0; background: #fff; border: 2px solid transparent; border-radius: 8px; overflow: hidden; cursor: pointer; position: relative; }
+.card img, .card video { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: #ddd; }
+.card figcaption { padding: 6px 8px; font-size: 0.78rem; line-height: 1.35; }
+.card figcaption span { color: var(--muted); font-size: 0.72rem; word-break: break-all; }
+.card .why { position: absolute; top: 6px; left: 6px; background: var(--warn); color: #fff; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; }
+.card.playing { outline: 2px solid var(--accent); }
+.card.playing::before { content: "再生中"; position: absolute; bottom: 58px; right: 6px; z-index: 1; background: var(--accent); color: #fff; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; }
+.card.excluded { border-color: var(--no); }
+.card.excluded img, .card.excluded video { opacity: .3; }
+.card.excluded::after { content: "除外"; position: absolute; top: 6px; right: 6px; background: var(--no); color: #fff; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; }

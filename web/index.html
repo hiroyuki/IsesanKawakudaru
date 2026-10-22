@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>2017 川下り 山谷川から石巻へ</title>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" />
   </head>
   <body>
     <!-- data-view: map(地図のみ) / split(上=写真 下=地図) / photo(写真のみ) -->
@@ -12,6 +12,12 @@
       <!-- 上半分: 写真 -->
       <section id="photo" aria-label="写真">
         <img id="photo-img" alt="" draggable="false" />
+        <video id="photo-video" playsinline preload="metadata" hidden></video>
+        <div id="video-ui" hidden>
+          <button id="btn-play" type="button" aria-label="再生"></button>
+          <div id="video-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="video-progress"></div></div>
+          <button id="btn-mute" type="button" aria-label="音を消す" aria-pressed="false"></button>
+        </div>
         <div id="photo-camera" aria-label="カメラ"></div>
         <button id="btn-close" type="button" aria-label="閉じる">×</button>
         <div id="photo-caption">
@@ -23,6 +29,11 @@
           <button id="btn-next" type="button" aria-label="次の写真">›</button>
         </nav>
       </section>
+      <!-- 軌跡にマウスを乗せたときのサムネイル(PC のみ) -->
+      <div id="hover" hidden aria-hidden="true">
+        <img id="hover-img" alt="" />
+        <div id="hover-time"></div>
+      </div>
       <!-- 間: タイムラインのスライダー。左端が旅の始まり、右端が終わり。日ごとの区間と目盛り -->
       <div id="scrub" role="slider" aria-label="時刻順に写真を選ぶ" aria-valuemin="1" aria-valuemax="1" aria-valuenow="1" tabindex="0">
         <div id="scrub-days"></div>
@@ -33,10 +44,14 @@
         <div id="map" role="application"></div>
         <h1 id="title">2017 川下り<span>山谷川の源流から石巻の海まで</span></h1>
         <div id="days" role="group" aria-label="日付で絞り込み"></div>
+        <div id="kinds" role="group" aria-label="写真と動画で絞り込み">
+          <button class="chip" type="button" data-kind="all" aria-pressed="true">すべて <b>0</b></button>
+          <button class="chip" type="button" data-kind="photo" aria-pressed="false">写真 <b>0</b></button>
+          <button class="chip" type="button" data-kind="video" aria-pressed="false">動画 <b>0</b></button>
+        </div>
         <div id="toolbar">
           <button id="btn-layer" type="button" aria-pressed="false">航空写真</button>
           <button id="btn-fit" type="button">全体</button>
-          <span id="count" aria-live="polite"></span>
         </div>
       </section>
     </div>
