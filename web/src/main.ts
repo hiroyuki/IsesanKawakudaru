@@ -7,6 +7,7 @@ import "./style.css";
  *  - 画面を上下に二分。上 = 写真、下 = 地図。地図には軌跡(赤線)と日付ラベルだけを描き、写真のピンは置かない。
  *  - 軌跡の上をマウスでなぞる(PC)/タップする(スマホ)と、その場所で撮った写真が上に出る。軌跡上には青い点。
  *  - 前後ボタン・矢印キー・写真の左右スワイプで時刻順に移動。写真が地図の外に出たら地図が追う。
+ *  - 見え方は 3 つ: map(読み込み時、地図のみ) → 写真が選ばれると split(上=写真 下=地図) → 写真タップで photo(写真のみ)。× で 1 段階戻る。
  *  - 上下の間にタイムラインのスライダー。左端が旅の始まり、右端が終わり。ドラッグで時刻順に写真を送る(スマホ向け)。
  *  - 日付チップで日ごとに絞り込み。軌跡は時間が空いた所・瞬間移動の所で切る。
  */
@@ -47,6 +48,15 @@ let visible: MediaItem[] = []; // 位置あり・日付フィルタ後・時刻�
 let segments: MediaItem[][] = []; // 軌跡の区間
 let currentDay: string | null = null;
 let current: MediaItem | null = null;
+
+type View = "map" | "split" | "photo";
+const app = document.getElementById("app")!;
+function setView(v: View) {
+  app.dataset.view = v;
+  $("#btn-close").setAttribute("aria-label", v === "photo" ? "分割表示に戻る" : "地図だけにする");
+  if (v !== "photo") screenDirty = true; // 地図の大きさが変わるので画面座標を取り直す
+}
+const view = () => app.dataset.view as View;
 
 // ---- 地図 ------------------------------------------------------------------
 const map = new maplibregl.Map({
@@ -186,6 +196,7 @@ let fullTimer: number | undefined;
 function setCurrent(item: MediaItem, follow: boolean) {
   const changed = current !== item;
   current = item;
+  if (view() === "map") setView("split"); // 写真が選ばれたら上半分を開く
   if (changed) {
     // なぞっている最中はサムネイル(軽い)。少し止まったら大きい画像に差し替える
     photoImg.src = `${MEDIA_BASE}/thumb/${item.id}.jpg`;
@@ -216,9 +227,8 @@ function setCurrent(item: MediaItem, follow: boolean) {
 }
 
 function step(delta: number) {
-  const base = current ?? visible[0];
-  if (!base) return;
-  const next = visible[(current ? base.vi : -1) + delta] ?? (current ? undefined : visible[0]);
+  if (visible.length === 0) return;
+  const next = current ? visible[current.vi + delta] : visible[0];
   if (next) setCurrent(next, true);
 }
 
@@ -237,7 +247,7 @@ function buildDayChips() {
       applyFilter();
       fitTo(visible);
       current = null; // 絞り込みで枚数・添字が変わるので、同じ写真でも表示を作り直す
-      if (visible[0]) setCurrent(visible[0], false);
+      if (visible[0] && view() !== "map") setCurrent(visible[0], false);
     });
     return b;
   };
@@ -402,7 +412,6 @@ map.on("load", async () => {
   buildDayChips();
   applyFilter();
   fitTo(visible);
-  if (visible[0]) setCurrent(visible[0], false);
 
   const canHover = window.matchMedia("(hover: hover)").matches;
   map.on("mousemove", (e) => {
@@ -416,6 +425,7 @@ map.on("load", async () => {
     if (near) setCurrent(near, false);
   });
   map.on("move", () => { screenDirty = true; });
+  map.on("resize", () => { screenDirty = true; });
 });
 
 // ---- UI --------------------------------------------------------------------
@@ -426,11 +436,15 @@ $("#btn-layer").addEventListener("click", (e) => {
   b.setAttribute("aria-pressed", String(on));
   map.setLayoutProperty("photo", "visibility", on ? "visible" : "none");
 });
+// 写真タップでフルスクリーン、× で 1 段階戻る(photo → split → map)
+$("#photo-img").addEventListener("click", () => { if (view() === "split") setView("photo"); });
+$("#btn-close").addEventListener("click", () => setView(view() === "photo" ? "split" : "map"));
 $("#btn-prev").addEventListener("click", () => step(-1));
 $("#btn-next").addEventListener("click", () => step(1));
 document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowLeft") { step(-1); e.preventDefault(); }
   else if (e.key === "ArrowRight") { step(1); e.preventDefault(); }
+  else if (e.key === "Escape" && view() !== "map") setView(view() === "photo" ? "split" : "map");
 });
 
 // 写真の左右スワイプで前後
