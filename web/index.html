@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>2017 川下り 山谷川から石巻へ</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- 上半分: 写真 -->
+      <section id="photo" aria-label="写真">
+        <h1 id="title">2017 川下り<span>山谷川の源流から石巻の海まで</span></h1>
+        <img id="photo-img" alt="" draggable="false" />
+        <div id="photo-camera" aria-label="カメラ"></div>
+        <div id="photo-caption">
+          <div id="photo-time">—</div>
+          <div id="photo-sub">軌跡の上をなぞるか、タップしてください</div>
+        </div>
+        <nav id="photo-nav" aria-label="前後の写真">
+          <button id="btn-prev" type="button" aria-label="前の写真">‹</button>
+          <button id="btn-next" type="button" aria-label="次の写真">›</button>
+        </nav>
+      </section>
+      <!-- 間: タイムラインのスライダー。左端が旅の始まり、右端が終わり。日ごとの区間と目盛り -->
+      <div id="scrub" role="slider" aria-label="時刻順に写真を選ぶ" aria-valuemin="1" aria-valuemax="1" aria-valuenow="1" tabindex="0">
+        <div id="scrub-days"></div>
+        <div id="scrub-thumb"></div>
+      </div>
+      <!-- 下半分: 地図 -->
+      <section id="mapwrap" aria-label="地図">
+        <div id="map" role="application"></div>
+        <div id="days" role="group" aria-label="日付で絞り込み"></div>
+        <div id="toolbar">
+          <button id="btn-layer" type="button" aria-pressed="false">航空写真</button>
+          <button id="btn-fit" type="button">全体</button>
+          <span id="count" aria-live="polite"></span>
+        </div>
+      </section>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
