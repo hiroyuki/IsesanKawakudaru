@@ -5,9 +5,10 @@ import "./style.css";
 /*
  * 設計
  *  - 画面を上下に二分。上 = 写真、下 = 地図。地図には軌跡(赤線)と日付ラベルだけを描き、写真のピンは置かない。
- *  - 軌跡の上をマウスでなぞる(PC)/タップする(スマホ)と、その場所で撮った写真が上に出る。軌跡上には青い点。
+ *  - 軌跡をクリック/タップすると、その場所で撮った写真が上に出る(split)。軌跡から離れた所をタップすると閉じる(map)。
+ *  - PC では軌跡にマウスを乗せるとサムネイルと日時が小さく出る(写真は切り替えない)。軌跡上には点。
  *  - 前後ボタン・矢印キー・写真の左右スワイプで時刻順に移動。写真が地図の外に出たら地図が追う。
- *  - 見え方は 3 つ: map(読み込み時、地図のみ) → 写真が選ばれると split(上=写真 下=地図) → 写真タップで photo(写真のみ)。× で 1 段階戻る。
+ *  - 見え方は 3 つ: map(読み込み時、地図のみ。スライダーも出さない) → 写真が選ばれると split(上=写真 下=地図) → 写真タップで photo(写真のみ)。× で 1 段階戻る。
  *  - 上下の間にタイムラインのスライダー。左端が旅の始まり、右端が終わり。ドラッグで時刻順に写真を送る(スマホ向け)。
  *  - 日付チップで日ごとに絞り込み。軌跡は時間が空いた所・瞬間移動の所で切る。
  */
@@ -25,28 +26,32 @@ type MediaItem = {
   w: number;
   h: number;
   duration?: number;
+  hidden?: boolean; // 選別で除外(data/exclude.json)
+  li: number; // located 内の添字(軌跡・画面座標用)
   vi: number; // visible 内の添字(フィルタごとに振り直す)
 };
+type Kind = "all" | "photo" | "video";
 
 const MEDIA_BASE = (import.meta.env.VITE_MEDIA_BASE as string | undefined) ?? "/media";
 const GSI = "https://cyberjapandata.gsi.go.jp/xyz";
 const ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル</a>';
 const TRACK_GAP_MS = 60 * 60 * 1000;
 const MIN_DAY_ITEMS = 10; // これより少ない日(8/4 の 2 枚、7/31 の前日分など)は扱わない
-// 軌跡を切る条件: 1 km 以上を 100 km/h 超で移動した区間(= GPS の瞬間移動)。車での移動は残す
+// 軌跡を切る条件: 連続する写真の間が 1 km 以上離れていたら線を引かない(速度は見ない)
 const JUMP_KM = 1.0;
-const JUMP_KMH = 100;
 const HOVER_RADIUS = 14; // px。線からこの距離以内でなぞりに反応
 const TAP_RADIUS = 28; // px。タップ用に広め
 const FULL_DELAY_MS = 180; // なぞっている間はサムネイル、止まったら大きい画像に差し替えるまでの時間
-const COLORS = { river: "#2a6f97", track: "#d93e2c" };
+const COLORS = { river: "#2a6f97", track: "#d93e2c", video: "#7a3fa0" };
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
 let all: MediaItem[] = [];
-let visible: MediaItem[] = []; // 位置あり・日付フィルタ後・時刻順
-let segments: MediaItem[][] = []; // 軌跡の区間
+let located: MediaItem[] = []; // 位置あり・日付フィルタ後・時刻順(写真も動画も)。軌跡はこれで描く
+let visible: MediaItem[] = []; // located をさらに写真/動画で絞ったもの。送り・スライダーはこれ
+let segments: MediaItem[][] = []; // 軌跡の区間(located)
 let currentDay: string | null = null;
+let currentKind: Kind = "all";
 let current: MediaItem | null = null;
 
 type View = "map" | "split" | "photo";
@@ -78,6 +83,7 @@ const map = new maplibregl.Map({
   maxZoom: 18,
   attributionControl: false,
 });
+map.keyboard.disable(); // 矢印キーは写真送りに使う(地図のキー操作はオフ)
 map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-left");
 map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
 if (import.meta.env.DEV) (window as unknown as { __map: maplibregl.Map }).__map = map;
@@ -98,10 +104,8 @@ function trackSegments(items: MediaItem[]): MediaItem[][] {
   for (const it of items) {
     if (!it.time) continue;
     if (prev && cur.length) {
-      const dtH = (Date.parse(it.time) - Date.parse(prev.time!)) / 3_600_000;
-      const km = distanceKm(prev, it);
-      const jump = km >= JUMP_KM && (dtH === 0 || km / dtH > JUMP_KMH);
-      if (dtH * 3_600_000 > TRACK_GAP_MS || jump) {
+      const gapMs = Date.parse(it.time) - Date.parse(prev.time!);
+      if (gapMs > TRACK_GAP_MS || distanceKm(prev, it) >= JUMP_KM) {
         segs.push(cur);
         cur = [];
       }
@@ -132,6 +136,10 @@ function daysGeoJSON(items: MediaItem[]): GeoJSON.FeatureCollection {
   };
 }
 
+function pointsGeoJSON(items: MediaItem[]): GeoJSON.FeatureCollection {
+  return { type: "FeatureCollection", features: items.map((it) => ({ type: "Feature", geometry: { type: "Point", coordinates: [it.lon!, it.lat!] }, properties: {} })) };
+}
+
 function pointGeoJSON(item: MediaItem | null): GeoJSON.FeatureCollection {
   return { type: "FeatureCollection", features: item ? [{ type: "Feature", geometry: { type: "Point", coordinates: [item.lon!, item.lat!] }, properties: {} }] : [] };
 }
@@ -143,14 +151,24 @@ function dayLabel(day: string): string {
 
 // ---- 表示状態 ---------------------------------------------------------------
 function applyFilter() {
-  visible = all.filter((it) => it.lat !== null && (currentDay === null || it.day === currentDay));
+  located = all.filter((it) => it.lat !== null && (currentDay === null || it.day === currentDay));
+  located.forEach((it, i) => (it.li = i));
+  visible = located.filter((it) => currentKind === "all" || it.type === currentKind);
   visible.forEach((it, i) => (it.vi = i));
-  segments = trackSegments(visible);
+  segments = trackSegments(located);
   (map.getSource("track") as GeoJSONSource).setData(trackGeoJSON(segments));
-  (map.getSource("days") as GeoJSONSource).setData(daysGeoJSON(visible));
+  (map.getSource("days") as GeoJSONSource).setData(daysGeoJSON(located));
+  (map.getSource("videos") as GeoJSONSource).setData(pointsGeoJSON(located.filter((i) => i.type === "video")));
+  // 種類で絞っているときは、その素材だけを地図に出す(写真 = 軌跡、動画 = 紫の点)
+  for (const l of ["track-casing", "track"]) map.setLayoutProperty(l, "visibility", currentKind === "video" ? "none" : "visible");
+  map.setLayoutProperty("video-dots", "visibility", currentKind === "photo" ? "none" : "visible");
   screenDirty = true;
-  const photos = visible.filter((i) => i.type === "photo").length;
-  $("#count").textContent = `写真 ${photos} 枚・動画 ${visible.length - photos} 本`;
+  // 種類チップに枚数(日付で絞った範囲の数)
+  const photos = located.filter((i) => i.type === "photo").length;
+  const counts: Record<Kind, number> = { all: located.length, photo: photos, video: located.length - photos };
+  $("#kinds").querySelectorAll<HTMLButtonElement>(".chip").forEach((b) => {
+    b.querySelector("b")!.textContent = String(counts[b.dataset.kind as Kind]);
+  });
   buildScrub();
 }
 
@@ -190,7 +208,51 @@ function fmtTime(iso: string | null): string {
 
 // ---- 写真パネル ---------------------------------------------------------------
 const photoImg = $("#photo-img") as HTMLImageElement;
+const photoVideo = $("#photo-video") as HTMLVideoElement;
 let fullTimer: number | undefined;
+
+const videoUi = $("#video-ui");
+
+/** 動画なら <video> に切り替えて自動再生(ポスターは閲覧用 JPEG)。写真なら video を止めて隠す */
+function showVideo(item: MediaItem | null) {
+  const photo = $("#photo");
+  if (item && item.type === "video") {
+    photo.dataset.type = "video";
+    photoVideo.poster = `${MEDIA_BASE}/web/${item.id}.jpg`;
+    photoVideo.src = `${MEDIA_BASE}/video/${item.id}.mp4`;
+    photoVideo.hidden = false;
+    videoUi.hidden = false;
+    $("#video-progress").style.width = "0";
+    photoVideo.play().catch(() => { /* 自動再生が拒否されたら再生ボタンを待つ */ });
+  } else {
+    photo.dataset.type = "photo";
+    if (!photoVideo.hidden) { photoVideo.pause(); photoVideo.removeAttribute("src"); photoVideo.load(); }
+    photoVideo.hidden = true;
+    videoUi.hidden = true;
+  }
+}
+
+// 再生 UI: タップで再生/一時停止、進行バーでシーク、音の ON/OFF
+photoVideo.addEventListener("click", () => { if (photoVideo.paused) photoVideo.play(); else photoVideo.pause(); });
+$("#btn-play").addEventListener("click", () => photoVideo.play());
+photoVideo.addEventListener("play", () => { $("#photo").dataset.playing = "1"; });
+photoVideo.addEventListener("pause", () => { delete $("#photo").dataset.playing; });
+photoVideo.addEventListener("ended", () => { delete $("#photo").dataset.playing; });
+photoVideo.addEventListener("timeupdate", () => {
+  const pct = photoVideo.duration ? (photoVideo.currentTime / photoVideo.duration) * 100 : 0;
+  $("#video-progress").style.width = `${pct}%`;
+  $("#video-bar").setAttribute("aria-valuenow", String(Math.round(pct)));
+});
+$("#video-bar").addEventListener("click", (e) => {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  if (photoVideo.duration) photoVideo.currentTime = ((e.clientX - r.left) / r.width) * photoVideo.duration;
+});
+$("#btn-mute").addEventListener("click", (e) => {
+  const b = e.currentTarget as HTMLButtonElement;
+  photoVideo.muted = !photoVideo.muted;
+  b.setAttribute("aria-pressed", String(photoVideo.muted));
+  b.setAttribute("aria-label", photoVideo.muted ? "音を出す" : "音を消す");
+});
 
 /** 写真を上半分に出す。follow=true なら地図の外にあるとき地図を寄せる */
 function setCurrent(item: MediaItem, follow: boolean) {
@@ -207,15 +269,17 @@ function setCurrent(item: MediaItem, follow: boolean) {
       full.onload = () => { if (current === item) photoImg.src = full.src; };
       full.src = `${MEDIA_BASE}/web/${item.id}.jpg`;
     }, FULL_DELAY_MS);
+    showVideo(item);
     $("#photo-time").textContent = fmtTime(item.time);
     const parts = [`${item.vi + 1} / ${visible.length}`];
-    if (item.type === "video") parts.push(`動画 ${item.duration ?? "?"} 秒(再生は後日対応)`);
+    if (item.type === "video") parts.push(`動画 ${item.duration ?? "?"} 秒`);
     if (item.gps !== "exif") parts.push("位置は前後の写真から推定");
     $("#photo-sub").textContent = parts.join("・");
     $("#photo-camera").textContent = cameraName(item);
     ($("#btn-prev") as HTMLButtonElement).disabled = item.vi === 0;
     ($("#btn-next") as HTMLButtonElement).disabled = item.vi === visible.length - 1;
     (map.getSource("cursor") as GeoJSONSource).setData(pointGeoJSON(item));
+    map.setPaintProperty("cursor", "circle-color", item.type === "video" ? COLORS.video : COLORS.track);
     updateScrub(item);
   }
   if (follow) {
@@ -253,6 +317,48 @@ function buildDayChips() {
   };
   wrap.appendChild(mk("全日", null));
   for (const d of days) wrap.appendChild(mk(dayLabel(d), d));
+
+  const kinds = $("#kinds");
+  kinds.querySelectorAll<HTMLButtonElement>(".chip").forEach((b) => {
+    b.addEventListener("click", () => {
+      currentKind = b.dataset.kind as Kind;
+      kinds.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", String(c === b)));
+      const keep = view() !== "map" ? current : null; // 今の写真が残るならそのまま、消えるなら時刻の近いものへ
+      applyFilter();
+      current = null;
+      if (view() === "map") return; // 地図のみのときはパネルを開かない(日付フィルターと同じ)
+      const next = keep ? toVisible(keep) : null;
+      if (next) setCurrent(next, true);
+      else if (visible[0]) setCurrent(visible[0], true);
+    });
+  });
+}
+
+// ---- ホバーのサムネイル(PC) ------------------------------------------------------
+const hoverEl = $("#hover");
+const hoverImg = $("#hover-img") as HTMLImageElement;
+let hoverItem: MediaItem | null = null;
+
+function hoverShow(item: MediaItem, ev: MouseEvent) {
+  if (hoverItem !== item) {
+    hoverItem = item;
+    hoverImg.src = `${MEDIA_BASE}/thumb/${item.id}.jpg`;
+    hoverEl.dataset.type = item.type;
+    $("#hover-time").textContent = (item.type === "video" ? "動画 " : "") + fmtTime(item.time);
+    (map.getSource("hover") as GeoJSONSource).setData(pointGeoJSON(item));
+  }
+  const W = hoverEl.offsetWidth || 180, H = hoverEl.offsetHeight || 165, M = 14;
+  const x = ev.clientX + M + W > window.innerWidth ? ev.clientX - M - W : ev.clientX + M;
+  const y = ev.clientY - H - M < 0 ? ev.clientY + M : ev.clientY - H - M; // 基本はカーソルの上に出す
+  hoverEl.style.transform = `translate(${Math.max(4, x)}px, ${Math.max(4, y)}px)`;
+  hoverEl.hidden = false;
+}
+
+function hoverHide() {
+  if (hoverEl.hidden) return;
+  hoverEl.hidden = true;
+  hoverItem = null;
+  (map.getSource("hover") as GeoJSONSource).setData(pointGeoJSON(null));
 }
 
 // ---- スライダー(タイムライン) ---------------------------------------------------
@@ -348,24 +454,32 @@ let screenPts: Float64Array = new Float64Array(0); // [x0,y0,x1,y1,...] visible 
 
 function refreshScreenPts() {
   if (!screenDirty) return;
-  screenPts = new Float64Array(visible.length * 2);
-  for (let i = 0; i < visible.length; i++) {
-    const p = map.project([visible[i].lon!, visible[i].lat!]);
+  screenPts = new Float64Array(located.length * 2);
+  for (let i = 0; i < located.length; i++) {
+    const p = map.project([located[i].lon!, located[i].lat!]);
     screenPts[i * 2] = p.x;
     screenPts[i * 2 + 1] = p.y;
   }
   screenDirty = false;
 }
 
-/** 画面座標に一番近い軌跡の線分を探し、その線分の近い方の端の写真を返す */
+/** 画面座標に一番近い軌跡の線分を探し、その線分の近い方の端の写真を返す。動画モードでは紫の点との距離で探す */
 function nearestOnTrack(pt: { x: number; y: number }, radius: number): MediaItem | null {
   refreshScreenPts();
   let best: MediaItem | null = null;
   let bestD = radius * radius;
+  if (currentKind === "video") {
+    for (const it of visible) {
+      const dx = screenPts[it.li * 2] - pt.x, dy = screenPts[it.li * 2 + 1] - pt.y;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = it; }
+    }
+    return best;
+  }
   for (const seg of segments) {
     for (let k = 1; k < seg.length; k++) {
       const a = seg[k - 1], b = seg[k];
-      const ax = screenPts[a.vi * 2], ay = screenPts[a.vi * 2 + 1], bx = screenPts[b.vi * 2], by = screenPts[b.vi * 2 + 1];
+      const ax = screenPts[a.li * 2], ay = screenPts[a.li * 2 + 1], bx = screenPts[b.li * 2], by = screenPts[b.li * 2 + 1];
       const dx = bx - ax, dy = by - ay;
       const len2 = dx * dx + dy * dy;
       const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((pt.x - ax) * dx + (pt.y - ay) * dy) / len2));
@@ -374,13 +488,28 @@ function nearestOnTrack(pt: { x: number; y: number }, radius: number): MediaItem
       if (d < bestD) { bestD = d; best = t < 0.5 ? a : b; }
     }
   }
-  return best;
+  return best && toVisible(best);
+}
+
+/** 軌跡上の点(located)を、種類フィルター後の一番時刻が近い項目に寄せる */
+function toVisible(item: MediaItem): MediaItem | null {
+  if (visible.length === 0) return null;
+  if (currentKind === "all" || item.type === currentKind) return item;
+  const t = Date.parse(item.time!);
+  let lo = 0, hi = visible.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (Date.parse(visible[mid].time!) < t) lo = mid + 1; else hi = mid;
+  }
+  const a = visible[lo - 1], b = visible[lo];
+  if (!a) return b;
+  return Math.abs(Date.parse(a.time!) - t) <= Math.abs(Date.parse(b.time!) - t) ? a : b;
 }
 
 // ---- レイヤーとイベント --------------------------------------------------------
 map.on("load", async () => {
   const res = await fetch("/data/media.json");
-  all = ((await res.json()) as { items: MediaItem[] }).items;
+  all = ((await res.json()) as { items: MediaItem[] }).items.filter((it) => !it.hidden);
   const perDay = new Map<string, number>();
   for (const it of all) if (it.day && it.lat !== null) perDay.set(it.day, (perDay.get(it.day) ?? 0) + 1);
   all = all.filter((it) => it.day && (perDay.get(it.day) ?? 0) >= MIN_DAY_ITEMS);
@@ -388,6 +517,8 @@ map.on("load", async () => {
   map.addSource("track", { type: "geojson", data: trackGeoJSON([]) });
   map.addSource("days", { type: "geojson", data: daysGeoJSON([]) });
   map.addSource("cursor", { type: "geojson", data: pointGeoJSON(null) });
+  map.addSource("hover", { type: "geojson", data: pointGeoJSON(null) });
+  map.addSource("videos", { type: "geojson", data: pointsGeoJSON([]) });
 
   map.addLayer({
     id: "track-casing", type: "line", source: "track",
@@ -399,14 +530,26 @@ map.on("load", async () => {
     layout: { "line-join": "round", "line-cap": "round" },
     paint: { "line-color": COLORS.track, "line-width": ["interpolate", ["linear"], ["zoom"], 8, 3, 14, 5], "line-opacity": 0.9 },
   });
+  // 動画を撮った場所は紫の点(写真は赤い軌跡そのもの)
+  map.addLayer({
+    id: "video-dots", type: "circle", source: "videos",
+    paint: {
+      "circle-color": COLORS.video, "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 3, 14, 6],
+      "circle-stroke-width": 1.5, "circle-stroke-color": "#ffffff",
+    },
+  });
   map.addLayer({
     id: "day-labels", type: "symbol", source: "days",
     layout: { "text-field": ["get", "label"], "text-font": ["Open Sans Bold"], "text-size": 12, "text-offset": [0.9, 0], "text-anchor": "left" },
     paint: { "text-color": COLORS.river, "text-halo-color": "#ffffff", "text-halo-width": 1.5 },
   });
   map.addLayer({
+    id: "hover-dot", type: "circle", source: "hover",
+    paint: { "circle-color": "#ffffff", "circle-radius": 5, "circle-stroke-width": 2, "circle-stroke-color": COLORS.river },
+  });
+  map.addLayer({
     id: "cursor", type: "circle", source: "cursor",
-    paint: { "circle-color": COLORS.river, "circle-radius": 8, "circle-stroke-width": 3, "circle-stroke-color": "#ffffff" },
+    paint: { "circle-color": COLORS.track, "circle-radius": 8, "circle-stroke-width": 3, "circle-stroke-color": "#ffffff" },
   });
 
   buildDayChips();
@@ -417,13 +560,17 @@ map.on("load", async () => {
   map.on("mousemove", (e) => {
     if (!canHover) return;
     const near = nearestOnTrack(e.point, HOVER_RADIUS);
-    map.getCanvas().style.cursor = near ? "crosshair" : "";
-    if (near) setCurrent(near, false);
+    map.getCanvas().style.cursor = near ? "pointer" : "";
+    if (near) hoverShow(near, e.originalEvent); else hoverHide();
   });
   map.on("click", (e) => {
+    hoverHide();
     const near = nearestOnTrack(e.point, TAP_RADIUS);
     if (near) setCurrent(near, false);
+    else if (view() !== "map") setView("map"); // 写真のない所をタップしたら閉じる
   });
+  map.on("movestart", hoverHide);
+  map.getCanvas().addEventListener("mouseleave", hoverHide);
   map.on("move", () => { screenDirty = true; });
   map.on("resize", () => { screenDirty = true; });
 });
@@ -438,6 +585,7 @@ $("#btn-layer").addEventListener("click", (e) => {
 });
 // 写真タップでフルスクリーン、× で 1 段階戻る(photo → split → map)
 $("#photo-img").addEventListener("click", () => { if (view() === "split") setView("photo"); });
+photoVideo.addEventListener("dblclick", () => { if (view() === "split") setView("photo"); });
 $("#btn-close").addEventListener("click", () => setView(view() === "photo" ? "split" : "map"));
 $("#btn-prev").addEventListener("click", () => step(-1));
 $("#btn-next").addEventListener("click", () => step(1));
@@ -445,6 +593,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowLeft") { step(-1); e.preventDefault(); }
   else if (e.key === "ArrowRight") { step(1); e.preventDefault(); }
   else if (e.key === "Escape" && view() !== "map") setView(view() === "photo" ? "split" : "map");
+  else if (e.key === " " && !photoVideo.hidden) { e.preventDefault(); if (photoVideo.paused) photoVideo.play(); else photoVideo.pause(); }
 });
 
 // 写真の左右スワイプで前後
