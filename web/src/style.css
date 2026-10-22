@@ -1,0 +1,109 @@
+/* レイアウト: 画面を上下に二分。上半分 = 写真、下半分 = 地図(軌跡のみ)。スマホ優先。 */
+:root {
+  --bg: #f6f4ee;
+  --surface: #ffffff;
+  --fg: #1f2a33;
+  --muted: #5d6b76;
+  --line: #d9d4c7;
+  --river: #2a6f97;
+  --track: #d93e2c;
+  --photo-bg: #101316;
+  --display: "Shippori Mincho", "Hiragino Mincho ProN", "Yu Mincho", serif;
+  --body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161b1f; --surface: #1f262c; --fg: #e8e4da; --muted: #a0a9b1; --line: #343d45;
+    --river: #7cb8d9; --track: #f0654f; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.5; overscroll-behavior: none; }
+#app {
+  height: 100%; display: grid; grid-template-rows: 1fr auto 1fr;
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* ---- 上半分: 写真 ---- */
+#photo { position: relative; background: var(--photo-bg); overflow: hidden; min-height: 0; }
+#photo-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--photo-bg); user-select: none; -webkit-user-select: none; }
+#photo-img[data-video="1"] { outline: 0; }
+#title {
+  position: absolute; z-index: 1; top: 10px; left: max(14px, env(safe-area-inset-left, 0px)); margin: 0;
+  font-family: var(--display); font-size: 1rem; font-weight: 700; line-height: 1.2; color: #fff;
+  text-shadow: 0 1px 3px rgba(0,0,0,.7);
+}
+#title span { display: block; font-size: 0.7rem; font-weight: 500; font-family: var(--body); opacity: .85; }
+#photo-camera {
+  position: absolute; z-index: 1; top: 10px; right: max(12px, env(safe-area-inset-right, 0px));
+  padding: 4px 10px; border-radius: 999px; font-size: 0.75rem; letter-spacing: 0.02em;
+  background: rgba(0,0,0,.45); color: #fff; border: 1px solid rgba(255,255,255,.35); backdrop-filter: blur(4px);
+}
+#photo-camera:empty { display: none; }
+#photo-caption {
+  position: absolute; z-index: 1; left: 0; right: 0; bottom: 0;
+  padding: 28px max(14px, env(safe-area-inset-right, 0px)) 10px max(14px, env(safe-area-inset-left, 0px));
+  background: linear-gradient(to top, rgba(0,0,0,.65), transparent); color: #fff; pointer-events: none;
+}
+#photo-time { font-family: var(--display); font-size: 1.25rem; font-variant-numeric: tabular-nums; line-height: 1.2; }
+#photo-sub { font-size: 0.78rem; opacity: .85; margin-top: 2px; }
+#photo-nav { position: absolute; z-index: 2; inset: 0; display: flex; justify-content: space-between; align-items: center; pointer-events: none; padding: 0 6px; }
+#photo-nav button {
+  pointer-events: auto; width: 40px; height: 56px; border: 0; border-radius: 8px; cursor: pointer;
+  background: rgba(0,0,0,.35); color: #fff; font-size: 1.8rem; line-height: 1; opacity: .8;
+}
+#photo-nav button:hover { opacity: 1; }
+#photo-nav button:disabled { opacity: .2; cursor: default; }
+#photo-nav button:focus-visible { outline: 2px solid #fff; }
+
+/* ---- 間: スライダー ---- */
+#scrub {
+  position: relative; height: 44px; background: var(--surface); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  touch-action: none; user-select: none; -webkit-user-select: none; cursor: ew-resize;
+  padding: 0 max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px));
+}
+#scrub:focus-visible { outline: 2px solid var(--track); outline-offset: -2px; }
+#scrub-days { position: absolute; inset: 0; margin: 0 max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px)); display: flex; align-items: stretch; }
+.scrub-day {
+  position: relative; min-width: 0; display: flex; align-items: flex-end; justify-content: flex-start;
+  border-left: 1px solid var(--line); font-size: 0.68rem; color: var(--muted); padding: 0 0 4px 4px; overflow: hidden; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.scrub-day::before { content: ""; position: absolute; left: 0; right: 2px; top: 14px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--track) 35%, transparent); }
+.scrub-day { padding-bottom: 2px; }
+.scrub-tick { position: absolute; top: 22px; width: 1px; height: 5px; background: var(--muted); opacity: .7; }
+.scrub-tick::after { content: attr(data-label); position: absolute; top: 5px; left: -8px; width: 16px; text-align: center; font-size: 0.6rem; color: var(--muted); line-height: 1; }
+.scrub-tick.no-label::after { display: none; }
+#scrub-thumb {
+  position: absolute; top: 6px; bottom: 6px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: var(--river);
+  box-shadow: 0 0 0 2px var(--surface); pointer-events: none;
+}
+#scrub-thumb::after {
+  content: ""; position: absolute; top: 4px; left: 50%; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%;
+  background: var(--river); border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); box-sizing: border-box;
+}
+
+/* ---- 下半分: 地図 ---- */
+#mapwrap { position: relative; min-height: 0; }
+#map { position: absolute; inset: 0; }
+#days {
+  position: absolute; z-index: 2; top: 8px; left: max(10px, env(safe-area-inset-left, 0px)); right: 56px;
+  display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px;
+}
+#days::-webkit-scrollbar { display: none; }
+.chip {
+  flex: 0 0 auto; font: inherit; font-size: 0.85rem; padding: 4px 11px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer;
+  font-variant-numeric: tabular-nums; box-shadow: 0 1px 3px rgba(0,0,0,.12);
+}
+.chip[aria-pressed="true"] { background: var(--river); border-color: var(--river); color: #fff; }
+.chip:focus-visible, button:focus-visible { outline: 2px solid var(--track); outline-offset: 2px; }
+#toolbar {
+  position: absolute; z-index: 2; right: max(10px, env(safe-area-inset-right, 0px)); bottom: 10px;
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
+}
+#toolbar button { font: inherit; font-size: 0.85rem; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+#toolbar button[aria-pressed="true"] { background: var(--river); border-color: var(--river); color: #fff; }
+#count { font-size: 0.72rem; color: var(--muted); background: color-mix(in srgb, var(--surface) 85%, transparent); padding: 2px 8px; border-radius: 6px; font-variant-numeric: tabular-nums; }
