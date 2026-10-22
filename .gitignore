@@ -1,0 +1,10 @@
+.DS_Store
+.worktrees/
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+
+# 素材(14GB)と生成物は git 管理外
+2017川下りALL/
+media/
