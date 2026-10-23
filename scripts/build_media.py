@@ -39,7 +39,7 @@ BBOX = (38.0, 140.5, 40.0, 142.0)  # lat0, lon0, lat1, lon1  (遠野〜石巻の
 SPIKE_KM = 0.5  # 前後の両方からこれ以上離れた場所へ飛んで戻る点は GPS スパイクとして捨てる
 SPIKE_MAX_RUN = 3  # 連続して飛んでいる点をまとめて捨てる最大数
 SPIKE_MAX_SPAN = timedelta(minutes=10)  # 飛んで戻るまでの最大時間
-INTERP_MAX = timedelta(hours=2)
+INTERP_MAX = timedelta(hours=2)  # これより離れた GPS 写真とは補間しない。超えても同じ日なら一番近い写真の位置を使う(日はまたがない)
 
 
 def media_id(name: str) -> str:
@@ -183,12 +183,15 @@ def interpolate(items: list[dict]) -> int:
                 lo = mid + 1
             else:
                 hi = mid
-        before = fixed[lo - 1] if lo > 0 else None
-        after = fixed[lo] if lo < len(fixed) else None
-        if before and (it["time"] - before["time"]) > INTERP_MAX:
-            before = None
-        if after and (after["time"] - it["time"]) > INTERP_MAX:
-            after = None
+        prev_fix = fixed[lo - 1] if lo > 0 else None
+        next_fix = fixed[lo] if lo < len(fixed) else None
+        before = prev_fix if prev_fix and (it["time"] - prev_fix["time"]) <= INTERP_MAX else None
+        after = next_fix if next_fix and (next_fix["time"] - it["time"]) <= INTERP_MAX else None
+        if not before and not after:
+            # 2 時間以内に無ければ、同じ日の一番近い GPS 写真を使う(キャンプ地で夕方に撮った動画など)
+            same_day = [f for f in (prev_fix, next_fix) if f and f["time"].date() == it["time"].date()]
+            if same_day:
+                before = min(same_day, key=lambda f: abs((f["time"] - it["time"]).total_seconds()))
         if before and after:
             span = (after["time"] - before["time"]).total_seconds()
             f = 0.5 if span == 0 else (it["time"] - before["time"]).total_seconds() / span
