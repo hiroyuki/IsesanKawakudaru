@@ -38,7 +38,7 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-w
 #app[data-view="photo"] #scrub { border-bottom: 0; }
 
 /* ---- 上半分: 写真 ---- */
-#photo { position: relative; background: var(--photo-bg); overflow: hidden; min-height: 0; }
+#photo { position: relative; background: var(--photo-bg); overflow: hidden; min-height: 0; touch-action: pan-y; } /* 横スワイプは写真送りに使う */
 #photo-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--photo-bg); user-select: none; -webkit-user-select: none; cursor: zoom-in; }
 #app[data-view="photo"] #photo-img { cursor: default; }
 #photo-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--photo-bg); }
@@ -55,6 +55,14 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-w
   border-left: 24px solid #fff; border-top: 15px solid transparent; border-bottom: 15px solid transparent;
 }
 #photo[data-playing="1"] #btn-play { display: none; }
+#photo[data-loading="1"] #btn-play { display: none; }
+/* 読み込み中(写真・動画共通): 細い輪が回るだけ */
+#spin {
+  display: none; position: absolute; z-index: 2; left: 50%; top: 50%; width: 28px; height: 28px; margin: -14px 0 0 -14px;
+  border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite;
+}
+#photo[data-loading="1"] #spin { display: block; }
+@keyframes spin { to { transform: rotate(360deg); } }
 /* 操作バー(動画の下端): 再生/一時停止・時間・シーク・音 */
 #video-ctl {
   position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; height: 44px;
@@ -87,9 +95,9 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-w
 }
 #btn-close:focus-visible { outline: 2px solid #fff; }
 #title {
-  position: absolute; z-index: 2; top: 80px; left: max(12px, env(safe-area-inset-left, 0px)); margin: 0; pointer-events: none;
-  font-family: var(--display); font-size: 1rem; font-weight: 700; line-height: 1.2; color: var(--fg);
-  text-shadow: 0 1px 2px var(--bg), 0 0 6px var(--bg);
+  position: absolute; z-index: 2; top: 8px; left: max(12px, env(safe-area-inset-left, 0px)); margin: 0; pointer-events: none;
+  font-family: var(--display); font-size: 1rem; font-weight: 700; line-height: 1.25; color: var(--fg);
+  padding: 6px 10px; border-radius: 6px; background: color-mix(in srgb, var(--surface) 82%, transparent); /* 地図の上で読めるよう薄い座布団 */
 }
 #title span { display: block; font-size: 0.7rem; font-weight: 500; font-family: var(--body); color: var(--muted); }
 #photo-camera {
@@ -163,33 +171,18 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-w
 /* ---- 下半分: 地図 ---- */
 #mapwrap { position: relative; min-height: 0; }
 #map { position: absolute; inset: 0; }
-#days {
-  position: absolute; z-index: 2; top: 8px; left: max(10px, env(safe-area-inset-left, 0px)); right: 56px;
-  display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px;
+/* フィルター: 日付と種類のプルダウン */
+#filters { position: absolute; z-index: 2; top: 58px; left: max(10px, env(safe-area-inset-left, 0px)); display: flex; gap: 8px; } /* タイトルの下 */
+.sel { display: inline-flex; align-items: center; gap: 6px; padding: 0 0 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--fg); font-size: 0.85rem; }
+.sel span { color: var(--muted); font-size: 0.75rem; }
+.sel select {
+  font: inherit; font-size: 0.85rem; padding: 6px 26px 6px 4px; border: 0; background: transparent; color: var(--fg); cursor: pointer;
+  appearance: none; -webkit-appearance: none; font-variant-numeric: tabular-nums;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' fill='none' stroke='%235d6b76' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 8px center; background-size: 10px;
 }
-#days::-webkit-scrollbar { display: none; }
-#kinds { position: absolute; z-index: 2; top: 44px; left: max(10px, env(safe-area-inset-left, 0px)); display: flex; gap: 6px; }
-#kinds .chip { font-size: 0.78rem; padding: 3px 10px; }
-#kinds .chip b { font-weight: 500; opacity: .75; margin-left: 2px; }
-/* 凡例を兼ねる: 写真 = 赤い軌跡、動画 = 紫の点 */
-#kinds .chip[data-kind="photo"]::before, #kinds .chip[data-kind="video"]::before {
-  content: ""; display: inline-block; vertical-align: middle; margin: -2px 5px 0 0;
-}
-#kinds .chip[data-kind="photo"]::before { width: 14px; height: 3px; border-radius: 2px; background: var(--track); }
-#kinds .chip[data-kind="video"]::before { width: 9px; height: 9px; border-radius: 50%; background: var(--video); border: 1.5px solid #fff; box-sizing: border-box; }
-#kinds .chip[aria-pressed="true"][data-kind="photo"]::before { background: #fff; }
-#kinds .chip[aria-pressed="true"][data-kind="video"]::before { border-color: #fff; }
-#chip-fav { color: var(--fav); display: inline-flex; align-items: center; gap: 4px; }
-#chip-fav svg { width: 13px; height: 13px; fill: transparent; stroke: currentColor; stroke-width: 2.2; stroke-linejoin: round; }
-#chip-fav[aria-pressed="true"] { background: var(--fav); border-color: var(--fav); color: #fff; }
-#chip-fav[aria-pressed="true"] svg { fill: #fff; stroke: #fff; }
-.chip {
-  flex: 0 0 auto; font: inherit; font-size: 0.85rem; padding: 4px 11px; border-radius: 999px;
-  border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer;
-  font-variant-numeric: tabular-nums;
-}
-.chip[aria-pressed="true"] { background: var(--river); border-color: var(--river); color: #fff; }
-.chip:focus-visible, button:focus-visible { outline: 2px solid var(--track); outline-offset: 2px; }
+.sel select:focus-visible { outline: 2px solid var(--track); outline-offset: -2px; border-radius: 6px; }
+button:focus-visible { outline: 2px solid var(--track); outline-offset: 2px; }
 #toolbar {
   position: absolute; z-index: 2; right: max(10px, env(safe-area-inset-right, 0px)); bottom: 10px;
   display: flex; flex-direction: column; gap: 6px; align-items: flex-end;

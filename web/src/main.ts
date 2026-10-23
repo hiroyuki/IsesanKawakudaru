@@ -68,6 +68,15 @@ function storeFavs() {
   try { localStorage.setItem("fav-ids", JSON.stringify([...favs])); } catch { /* 保存できない環境では諦める */ }
 }
 function favCount(): number { return located.filter((i) => favs.has(i.id)).length; }
+
+/** プルダウンの選択肢に枚数を添える(日付で絞った範囲の数) */
+function updateFilterLabels() {
+  const photos = located.filter((i) => i.type === "photo").length;
+  const labels: Record<string, string> = {
+    all: `すべて ${located.length}`, photo: `写真 ${photos}`, video: `動画 ${located.length - photos}`, fav: `お気に入り ${favCount()}`,
+  };
+  for (const o of ($("#sel-kind") as HTMLSelectElement).options) o.textContent = labels[o.value];
+}
 let current: MediaItem | null = null;
 
 type View = "map" | "split" | "photo";
@@ -170,6 +179,7 @@ function applyFilter() {
   located = all.filter((it) => it.lat !== null && (currentDay === null || it.day === currentDay));
   located.forEach((it, i) => (it.li = i));
   visible = located.filter((it) => (currentKind === "all" || it.type === currentKind) && (!favOnly || favs.has(it.id)));
+  updateFilterLabels();
   visible.forEach((it, i) => (it.vi = i));
   segments = trackSegments(located);
   (map.getSource("track") as GeoJSONSource).setData(trackGeoJSON(segments));
@@ -181,13 +191,6 @@ function applyFilter() {
   for (const l of ["track-casing", "track", "photo-dots"]) map.setLayoutProperty(l, "visibility", currentKind === "video" ? "none" : "visible");
   map.setLayoutProperty("video-dots", "visibility", currentKind === "photo" ? "none" : "visible");
   screenDirty = true;
-  // 種類チップに枚数(日付で絞った範囲の数)
-  const photos = located.filter((i) => i.type === "photo").length;
-  const counts: Record<Kind, number> = { all: located.length, photo: photos, video: located.length - photos };
-  $("#kinds").querySelectorAll<HTMLButtonElement>(".chip[data-kind]").forEach((b) => {
-    b.querySelector("b")!.textContent = String(counts[b.dataset.kind as Kind]);
-  });
-  $("#chip-fav").querySelector("b")!.textContent = String(favCount());
   buildScrub();
 }
 
@@ -229,6 +232,13 @@ function fmtTime(iso: string | null): string {
 const photoImg = $("#photo-img") as HTMLImageElement;
 const photoVideo = $("#photo-video") as HTMLVideoElement;
 let fullTimer: number | undefined;
+let photoSpinTimer: number | undefined;
+/** 読み込み中の輪(写真・動画共通) */
+const setLoading = (on: boolean) => { if (on) $("#photo").dataset.loading = "1"; else delete $("#photo").dataset.loading; };
+// 写真側の load/error は写真を見ているときだけ輪を消す(動画のときは隠れた img の完了で消さない)
+const photoImgDone = () => { window.clearTimeout(photoSpinTimer); if (current?.type !== "video") setLoading(false); };
+photoImg.addEventListener("load", photoImgDone);
+photoImg.addEventListener("error", photoImgDone);
 
 const videoUi = $("#video-ui");
 
@@ -271,6 +281,11 @@ function renderVideoTime() {
   $("#video-bar").setAttribute("aria-valuenow", String(Math.round(pct)));
   $("#video-time").textContent = `${fmtClock(photoVideo.currentTime)} / ${fmtClock(photoVideo.duration)}`;
 }
+// 動画の読み込み中: データ待ちになったら出し、再生できる状態になったら消す
+photoVideo.addEventListener("loadstart", () => setLoading(true));
+photoVideo.addEventListener("waiting", () => setLoading(true));
+photoVideo.addEventListener("seeking", () => setLoading(true));
+for (const ev of ["canplay", "playing", "seeked", "pause", "error", "emptied"]) photoVideo.addEventListener(ev, () => setLoading(false));
 photoVideo.addEventListener("timeupdate", renderVideoTime);
 photoVideo.addEventListener("loadedmetadata", renderVideoTime);
 $("#btn-pp").addEventListener("click", () => { if (photoVideo.paused) photoVideo.play(); else photoVideo.pause(); });
@@ -319,6 +334,11 @@ function setCurrent(item: MediaItem, follow: boolean) {
   if (changed) {
     // なぞっている最中はサムネイル(軽い)。少し止まったら大きい画像に差し替える
     photoImg.src = `${MEDIA_BASE}/thumb/${item.id}.jpg`;
+    if (item.type === "photo") {
+      window.clearTimeout(photoSpinTimer);
+      setLoading(false);
+      photoSpinTimer = window.setTimeout(() => { if (!photoImg.complete) setLoading(true); }, 300);
+    }
     photoImg.alt = fmtTime(item.time);
     window.clearTimeout(fullTimer);
     fullTimer = window.setTimeout(() => {
@@ -363,45 +383,29 @@ function step(delta: number) {
   if (next) setCurrent(next, true);
 }
 
-function buildDayChips() {
+function buildFilters() {
   const days = [...new Set(all.map((i) => i.day).filter((d): d is string => !!d))].sort();
-  const wrap = $("#days");
-  const mk = (label: string, day: string | null) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "chip";
-    b.textContent = label;
-    b.setAttribute("aria-pressed", String(day === currentDay));
-    b.addEventListener("click", () => {
-      currentDay = day;
-      wrap.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", String(c === b)));
-      applyFilter();
-      fitTo(visible);
-      reselectAfterFilter(null); // 枚数・添字が変わるので表示を作り直す
-    });
-    return b;
-  };
-  wrap.appendChild(mk("全日", null));
-  for (const d of days) wrap.appendChild(mk(dayLabel(d), d));
-
-  $("#chip-fav").addEventListener("click", (e) => {
-    const b = e.currentTarget as HTMLButtonElement;
-    favOnly = !favOnly;
-    b.setAttribute("aria-pressed", String(favOnly));
-    const keep = current;
+  const counts = new Map<string, number>();
+  for (const it of all) if (it.day && it.lat !== null) counts.set(it.day, (counts.get(it.day) ?? 0) + 1);
+  const selDay = $("#sel-day") as HTMLSelectElement;
+  const mk = (value: string, label: string) => { const o = document.createElement("option"); o.value = value; o.textContent = label; return o; };
+  selDay.appendChild(mk("", `全日 ${all.filter((i) => i.lat !== null).length}`));
+  for (const d of days) selDay.appendChild(mk(d, `${dayLabel(d)} ${counts.get(d) ?? 0}`));
+  selDay.addEventListener("change", () => {
+    currentDay = selDay.value || null;
     applyFilter();
-    reselectAfterFilter(keep);
+    fitTo(visible);
+    reselectAfterFilter(null); // 枚数・添字が変わるので表示を作り直す
   });
 
-  const kinds = $("#kinds");
-  kinds.querySelectorAll<HTMLButtonElement>(".chip[data-kind]").forEach((b) => {
-    b.addEventListener("click", () => {
-      currentKind = b.dataset.kind as Kind;
-      kinds.querySelectorAll(".chip[data-kind]").forEach((c) => c.setAttribute("aria-pressed", String(c === b)));
-      const keep = current; // 今の写真が残るならそのまま、消えるなら時刻の近いものへ
-      applyFilter();
-      reselectAfterFilter(keep);
-    });
+  const selKind = $("#sel-kind") as HTMLSelectElement;
+  selKind.addEventListener("change", () => {
+    const v = selKind.value;
+    favOnly = v === "fav";
+    currentKind = v === "fav" ? "all" : (v as Kind);
+    const keep = current; // 今の写真が残るならそのまま、消えるなら時刻の近いものへ
+    applyFilter();
+    reselectAfterFilter(keep);
   });
 }
 
@@ -650,7 +654,7 @@ map.on("load", async () => {
     paint: { "circle-color": COLORS.track, "circle-radius": 8, "circle-stroke-width": 3, "circle-stroke-color": "#ffffff" },
   });
 
-  buildDayChips();
+  buildFilters();
   applyFilter();
   fitTo(visible);
 
@@ -691,7 +695,7 @@ $("#btn-fav").addEventListener("click", () => {
   storeFavs();
   $("#btn-fav").setAttribute("aria-pressed", String(favs.has(current.id)));
   (map.getSource("favs") as GeoJSONSource).setData(pointsGeoJSON(located.filter((i) => favs.has(i.id))));
-  $("#chip-fav").querySelector("b")!.textContent = String(favCount());
+  updateFilterLabels();
   if (favOnly) { const keep = current; applyFilter(); reselectAfterFilter(keep); }
 });
 $("#btn-prev").addEventListener("click", () => step(-1));
@@ -703,15 +707,27 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === " " && !photoVideo.hidden) { e.preventDefault(); if (photoVideo.paused) photoVideo.play(); else photoVideo.pause(); }
 });
 
-// 写真の左右スワイプで前後
+// 写真の左右スワイプで前後(タッチのみ)。60px 以上横に動かして離したら隣へ。画像は動かさない(アニメーション無し)
 {
-  let sx = 0, sy = 0, active = false;
   const el = $("#photo");
-  el.addEventListener("touchstart", (e) => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; active = true; }, { passive: true });
-  el.addEventListener("touchend", (e) => {
-    if (!active) return;
-    active = false;
-    const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
-    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) step(dx < 0 ? 1 : -1);
-  }, { passive: true });
+  let id = -1, sx = 0, sy = 0, dx = 0, horizontal: boolean | null = null;
+  el.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "touch" || (e.target as HTMLElement).closest("button, #video-bar")) return;
+    id = e.pointerId; sx = e.clientX; sy = e.clientY; dx = 0; horizontal = null;
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (e.pointerId !== id) return;
+    dx = e.clientX - sx;
+    const dy = e.clientY - sy;
+    if (horizontal === null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) horizontal = Math.abs(dx) > Math.abs(dy);
+    if (horizontal) { try { el.setPointerCapture(id); } catch { /* 合成イベントなどで取れなければ無視 */ } }
+  });
+  const end = () => {
+    if (id === -1) return;
+    const go = horizontal && Math.abs(dx) > 60 ? (dx < 0 ? 1 : -1) : 0;
+    id = -1;
+    if (go) step(go);
+  };
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", () => { id = -1; }); // 中断(OS のジェスチャ等)は切り替えない
 }

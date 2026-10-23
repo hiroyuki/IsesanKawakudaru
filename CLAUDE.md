@@ -59,8 +59,14 @@ cd web && npm install && npm run dev
 
 worktree で作業する場合、`--src` と `--media` はメインリポジトリ側の絶対パスを指定する。
 
+## デプロイ(Cloudflare、個人アカウント hori@p4n.jp / account_id は web/wrangler.toml)
+
+- サイト + 写真(thumb/ web/): Cloudflare Pages プロジェクト `kawakudari` → https://kawakudari.pages.dev/ 。`scripts/deploy.sh` がビルドして `dist/media` に写真をコピーしてデプロイする(hidden は除く)。
+- 動画: R2 バケット `kawakudari-media`(公開 URL https://pub-dae6c5ccd89d4ee08dc0e6cbfb5d3724.r2.dev)。`scripts/upload_videos.sh` で `video/<id>.mp4` を上げる。25MB 超の動画があるため Pages には置けない。
+- wrangler は v3 を `npx wrangler@3` で使う(v4 は Node 22 が必要で、この Mac は Node 20)。
+- `web/.env.production` の VITE_VIDEO_BASE が R2 の URL。VITE_MEDIA_BASE は `/media`(Pages 同一オリジン)。
+
 ## 予定(未実装)
 
 - コメント機能: Cloudflare Pages Functions + D1、合言葉ログイン(投稿できるのはイセさんのみ)。写真に紐づくコメントと場所だけのコメント。
 - 動画は media/video/<id>.mp4(720p)を <video> で直接再生する(YouTube は使わない方針に変更の余地あり)。
-- デプロイ: Cloudflare Pages(サイト)+ R2(media/)。

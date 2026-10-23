@@ -13,6 +13,7 @@
       <section id="photo" aria-label="写真">
         <img id="photo-img" alt="" draggable="false" />
         <video id="photo-video" playsinline preload="metadata" hidden></video>
+        <div id="spin" role="status" aria-label="読み込み中"></div>
         <div id="video-ui" hidden>
           <button id="btn-play" type="button" aria-label="再生"></button>
           <div id="video-ctl">
@@ -48,12 +49,14 @@
       <section id="mapwrap" aria-label="地図">
         <div id="map" role="application"></div>
         <h1 id="title">2017 川下り<span>山谷川の源流から石巻の海まで</span></h1>
-        <div id="days" role="group" aria-label="日付で絞り込み"></div>
-        <div id="kinds" role="group" aria-label="写真と動画で絞り込み">
-          <button class="chip" type="button" data-kind="all" aria-pressed="true">すべて <b>0</b></button>
-          <button class="chip" type="button" data-kind="photo" aria-pressed="false">写真 <b>0</b></button>
-          <button class="chip" type="button" data-kind="video" aria-pressed="false">動画 <b>0</b></button>
-          <button class="chip" type="button" id="chip-fav" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.2-4.6-9.6-9.1C.7 8.6 2.3 4.5 6.1 4.1c2.2-.2 3.9 1 4.9 2.4 1-1.4 2.7-2.6 4.9-2.4 3.8.4 5.4 4.5 3.7 7.8C19.2 16.4 12 21 12 21z"/></svg>お気に入り <b>0</b></button>
+        <div id="filters">
+          <label class="sel"><span>日付</span><select id="sel-day" aria-label="日付で絞り込み"></select></label>
+          <label class="sel"><span>種類</span><select id="sel-kind" aria-label="種類で絞り込み">
+            <option value="all">すべて</option>
+            <option value="photo">写真</option>
+            <option value="video">動画</option>
+            <option value="fav">お気に入り</option>
+          </select></label>
         </div>
         <div id="toolbar">
           <button id="btn-layer" type="button" aria-pressed="false">航空写真</button>
