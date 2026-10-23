@@ -44,6 +44,7 @@ const MIN_DAY_ITEMS = 10; // これより少ない日(8/4 の 2 枚、7/31 の�
 // 軌跡を切る条件: 連続する写真の間が 1 km 以上離れていたら線を引かない(速度は見ない)
 const JUMP_KM = 1.0;
 const DOT_ZOOM = 14; // これ以上寄ったら軌跡の線をやめて写真を点で出す
+const OPEN_ZOOM = 12; // /p/<id> で写真を直接開いたときに寄るズーム(周りの行程が見える程度に引いておく)
 const SPREAD_PX = 6; // 点を出すズームで、画面上この距離(px)以内に重なった点はリング状に広げる
 const SPREAD_GAP = 16; // リング上の点の間隔(px)。一番大きい点(動画・お気に入り、直径 15px)が接しない距離
 const SPREAD_RING_MAX = 12; // 1 つのリングに置く最大数。これを超えたら外側のリングへ
@@ -757,7 +758,7 @@ map.on("load", async () => {
   if (start && start.lat !== null) {
     const shown = toVisible(start) ?? start;
     setCurrent(shown, false);
-    map.once("idle", () => map.easeTo({ center: [shown.lon!, shown.lat!], zoom: 13, duration: 800 }));
+    map.once("idle", () => map.easeTo({ center: [shown.lon!, shown.lat!], zoom: OPEN_ZOOM, duration: 800 }));
   }
 
   const canHover = window.matchMedia("(hover: hover)").matches;
