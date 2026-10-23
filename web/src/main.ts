@@ -45,8 +45,11 @@ const MIN_DAY_ITEMS = 10; // これより少ない日(8/4 の 2 枚、7/31 の�
 const JUMP_KM = 1.0;
 const DOT_ZOOM = 14; // これ以上寄ったら軌跡の線をやめて写真を点で出す
 const OPEN_ZOOM = 12; // /p/<id> で写真を直接開いたときに寄るズーム(周りの行程が見える程度に引いておく)
-const SPREAD_PX = 6; // 点を出すズームで、画面上この距離(px)以内に重なった点はリング状に広げる
-const SPREAD_GAP = 16; // リング上の点の間隔(px)。一番大きい点(動画・お気に入り、直径 15px)が接しない距離
+const SPREAD_ZOOM = 12; // これ以上寄ったら、画面上で重なった点をリング状に広げる(14 未満では点で描いている動画・お気に入りだけ)
+const SPREAD_PX = 6; // 画面上この距離(px)以内に重なった点を同じリングにまとめる
+const SPREAD_GROW = 2; // リングに広げた点は半径をこれだけ大きく描く(固まっている場所が目立つように)
+const SPREAD_GAP = 20; // リング上の点の間隔(px)。一番大きい点(動画・お気に入り、半径 6+2、縁 1.5)が接しない距離
+const SPREAD_GAP_FAR = 16; // 14 未満のズームでの間隔(点が小さいので詰める)
 const SPREAD_RING_MAX = 12; // 1 つのリングに置く最大数。これを超えたら外側のリングへ
 const HOVER_RADIUS = 14; // px。線からこの距離以内でなぞりに反応
 const TAP_RADIUS = 28; // px。タップ用に広め
@@ -172,8 +175,22 @@ function daysGeoJSON(items: MediaItem[]): GeoJSON.FeatureCollection {
   };
 }
 
+/** 点のレイヤー用。spread はリングに広げた点(大きく描く) */
 function pointsGeoJSON(items: MediaItem[]): GeoJSON.FeatureCollection {
-  return { type: "FeatureCollection", features: items.map((it) => ({ type: "Feature", geometry: { type: "Point", coordinates: [it.dlon ?? it.lon!, it.dlat ?? it.lat!] }, properties: {} })) };
+  return {
+    type: "FeatureCollection",
+    features: items.map((it) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [it.dlon ?? it.lon!, it.dlat ?? it.lat!] },
+      properties: { spread: it.dlon !== undefined && (it.dlon !== it.lon || it.dlat !== it.lat) },
+    })),
+  };
+}
+
+/** ズームで z0→z1 のとき半径 r0→r1、リングに広げた点(spread)ならさらに SPREAD_GROW 大きく。zoom 式は最上位の interpolate にしか置けない */
+function grown(z0: number, r0: number, z1: number, r1: number): maplibregl.ExpressionSpecification {
+  const extra: maplibregl.ExpressionSpecification = ["case", ["boolean", ["get", "spread"], false], SPREAD_GROW, 0];
+  return ["interpolate", ["linear"], ["zoom"], z0, ["+", r0, extra], z1, ["+", r1, extra]];
 }
 
 function pointGeoJSON(item: MediaItem | null): GeoJSON.FeatureCollection {
@@ -218,7 +235,11 @@ function updateDots(force = false) {
     it.dlon = it.lon!;
     it.dlat = it.lat!;
   }
-  const moved = map.getZoom() >= DOT_ZOOM ? spreadOverlaps(pts) : 0;
+  const z = map.getZoom();
+  // 14 以上はすべての点、12〜14 は線ではなく点で描いている動画・お気に入りだけを広げる(写真は軌跡の線の一部なので動かさない)
+  const moved = z >= SPREAD_ZOOM
+    ? spreadOverlaps(pts, z >= DOT_ZOOM ? () => true : (it) => it.type === "video" || favs.has(it.id), z >= DOT_ZOOM ? SPREAD_GAP : SPREAD_GAP_FAR)
+    : 0;
   screenDirty = true;
   if (!force && !dotsSpread && moved === 0) return; // 広げた点が前回も今回も無ければ描き直す必要なし
   dotsSpread = moved > 0;
@@ -564,7 +585,8 @@ function scrubAt(clientX: number) {
 
 // ---- 軌跡上の最近傍 ---------------------------------------------------------
 let screenDirty = true;
-let screenPts: Float64Array = new Float64Array(0); // [x0,y0,x1,y1,...] visible と同じ並び
+let screenPts: Float64Array = new Float64Array(0); // 本来の位置の画面座標 [x0,y0,x1,y1,...] located と同じ並び(軌跡の線の当たり判定用)
+let dotPts: Float64Array = new Float64Array(0); // 点として描いている位置(重なりを広げたあと)の画面座標(点の当たり判定用)
 
 /**
  * 当たり判定用の画面座標。点を出すズームでは描画している位置(dlon/dlat)を投影する。
@@ -573,12 +595,20 @@ let screenPts: Float64Array = new Float64Array(0); // [x0,y0,x1,y1,...] visible 
 function refreshScreenPts() {
   if (!screenDirty) return;
   screenPts = new Float64Array(located.length * 2);
-  const spread = map.getZoom() >= DOT_ZOOM;
+  dotPts = new Float64Array(located.length * 2);
   for (let i = 0; i < located.length; i++) {
     const it = located[i];
-    const p = spread ? map.project([it.dlon ?? it.lon!, it.dlat ?? it.lat!]) : map.project([it.lon!, it.lat!]);
+    const p = map.project([it.lon!, it.lat!]);
     screenPts[i * 2] = p.x;
     screenPts[i * 2 + 1] = p.y;
+    if (it.dlon === undefined || it.dlat === undefined || (it.dlon === it.lon && it.dlat === it.lat)) {
+      dotPts[i * 2] = p.x;
+      dotPts[i * 2 + 1] = p.y;
+    } else {
+      const q = map.project([it.dlon, it.dlat]);
+      dotPts[i * 2] = q.x;
+      dotPts[i * 2 + 1] = q.y;
+    }
   }
   screenDirty = false;
 }
@@ -586,13 +616,14 @@ function refreshScreenPts() {
 /**
  * 画面上で重なる点(SPREAD_PX 以内)を、本来の位置を中心にしたリングへ時刻順(時計回り)に並べ直す。
  * 同じ座標に何件も積み重なる「位置は前後の写真から推定」の動画などを 1 件ずつ見分けられるようにする。
- * pts は located と同じ並びの画面座標 [x0,y0,x1,y1,...]。広げた点の dlon/dlat を書き換え、その数を返す。
+ * pts は located と同じ並びの画面座標 [x0,y0,x1,y1,...]。eligible が真の点だけを対象に、広げた点の dlon/dlat を書き換え、その数を返す。
  */
-function spreadOverlaps(pts: Float64Array): number {
+function spreadOverlaps(pts: Float64Array, eligible: (it: MediaItem) => boolean, gap: number): number {
   const x = (i: number) => pts[i * 2], y = (i: number) => pts[i * 2 + 1];
   const cells = new Map<string, number[][]>(); // 格子のマス → そのマスに基準点を持つグループ(located の添字の配列)
   const groups: number[][] = [];
   for (let i = 0; i < located.length; i++) {
+    if (!eligible(located[i])) continue;
     const gx = Math.floor(x(i) / SPREAD_PX), gy = Math.floor(y(i) / SPREAD_PX);
     let found: number[] | null = null;
     // 基準点(グループの最初の点)が SPREAD_PX 以内にあるグループを隣のマスまで探す。軌跡に沿って延々と繋がらないよう、基準点との距離だけを見る
@@ -618,9 +649,9 @@ function spreadOverlaps(pts: Float64Array): number {
     for (const i of g) { ox += x(i); oy += y(i); }
     ox /= g.length; oy /= g.length; // リングの中心はグループの重心
     // 内側のリング(半径は件数に合わせて最小に)から順に置き、あふれた分は外側のリングへ。12 時の位置から時計回り
-    let r = SPREAD_GAP / (2 * Math.sin(Math.PI / Math.min(g.length, SPREAD_RING_MAX))); // 隣との弦の長さが SPREAD_GAP になる半径
-    for (let done = 0; done < g.length; r += SPREAD_GAP + 1) {
-      const n = Math.min(g.length - done, SPREAD_RING_MAX, Math.max(1, Math.floor((2 * Math.PI * r) / SPREAD_GAP)));
+    let r = gap / (2 * Math.sin(Math.PI / Math.min(g.length, SPREAD_RING_MAX))); // 隣との弦の長さが gap になる半径
+    for (let done = 0; done < g.length; r += gap + 1) {
+      const n = Math.min(g.length - done, SPREAD_RING_MAX, Math.max(1, Math.floor((2 * Math.PI * r) / gap)));
       for (let j = 0; j < n; j++) {
         const a = -Math.PI / 2 + (2 * Math.PI * j) / n;
         const ll = map.unproject([ox + r * Math.cos(a), oy + r * Math.sin(a)]);
@@ -634,19 +665,22 @@ function spreadOverlaps(pts: Float64Array): number {
   return moved;
 }
 
-/** 画面座標に一番近い軌跡の線分を探し、その線分の近い方の端の写真を返す。動画モードでは紫の点との距離で探す */
+/**
+ * 画面座標に一番近い素材を返す。まず点として描いている素材(14 以上はすべて、それ未満は動画・お気に入り)を広げた位置で探し、
+ * 当たらなければ軌跡の線分を探して、その線分の近い方の端の写真を返す
+ */
 function nearestOnTrack(pt: { x: number; y: number }, radius: number): MediaItem | null {
   refreshScreenPts();
   let best: MediaItem | null = null;
   let bestD = radius * radius;
-  if (currentKind === "video" || favOnly || map.getZoom() >= DOT_ZOOM) {
-    for (const it of visible) {
-      const dx = screenPts[it.li * 2] - pt.x, dy = screenPts[it.li * 2 + 1] - pt.y;
-      const d = dx * dx + dy * dy;
-      if (d < bestD) { bestD = d; best = it; }
-    }
-    return best;
+  const dotsOnly = currentKind === "video" || favOnly || map.getZoom() >= DOT_ZOOM;
+  for (const it of visible) {
+    if (!dotsOnly && it.type !== "video" && !favs.has(it.id)) continue;
+    const dx = dotPts[it.li * 2] - pt.x, dy = dotPts[it.li * 2 + 1] - pt.y;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) { bestD = d; best = it; }
   }
+  if (best || dotsOnly) return best;
   for (const seg of segments) {
     for (let k = 1; k < seg.length; k++) {
       const a = seg[k - 1], b = seg[k];
@@ -716,7 +750,7 @@ map.on("load", async () => {
   map.addLayer({
     id: "photo-dots", type: "circle", source: "photos", minzoom: DOT_ZOOM,
     paint: {
-      "circle-color": COLORS.track, "circle-radius": ["interpolate", ["linear"], ["zoom"], DOT_ZOOM, 3, 18, 6],
+      "circle-color": COLORS.track, "circle-radius": grown(DOT_ZOOM, 3, 18, 6),
       "circle-stroke-width": 1, "circle-stroke-color": "#ffffff", "circle-opacity": 0.9,
     },
   });
@@ -724,7 +758,7 @@ map.on("load", async () => {
   map.addLayer({
     id: "video-dots", type: "circle", source: "videos",
     paint: {
-      "circle-color": COLORS.video, "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 3, 14, 6],
+      "circle-color": COLORS.video, "circle-radius": grown(8, 3, 14, 6),
       "circle-stroke-width": 1.5, "circle-stroke-color": "#ffffff",
     },
   });
@@ -732,7 +766,7 @@ map.on("load", async () => {
   map.addLayer({
     id: "fav-dots", type: "circle", source: "favs",
     paint: {
-      "circle-color": COLORS.fav, "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 4, 14, 7],
+      "circle-color": COLORS.fav, "circle-radius": grown(8, 4, 14, 7),
       "circle-stroke-width": 1.5, "circle-stroke-color": "#ffffff",
     },
   });
@@ -799,7 +833,7 @@ $("#btn-fav").addEventListener("click", () => {
   if (favs.has(current.id)) favs.delete(current.id); else favs.add(current.id);
   storeFavs();
   $("#btn-fav").setAttribute("aria-pressed", String(favs.has(current.id)));
-  (map.getSource("favs") as GeoJSONSource).setData(pointsGeoJSON(located.filter((i) => favs.has(i.id))));
+  updateDots(true); // お気に入りはリングに広げる対象が変わるので、点の位置を決め直す
   updateFilterLabels();
   if (favOnly) { const keep = current; applyFilter(); reselectAfterFilter(keep); }
 });
