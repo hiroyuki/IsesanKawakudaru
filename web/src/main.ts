@@ -32,17 +32,20 @@ type MediaItem = {
 };
 type Kind = "all" | "photo" | "video";
 
-const MEDIA_BASE = (import.meta.env.VITE_MEDIA_BASE as string | undefined) ?? "/media";
+const MEDIA_BASE = (import.meta.env.VITE_MEDIA_BASE as string | undefined) ?? "/media"; // thumb/ web/ の置き場所
+const VIDEO_BASE = (import.meta.env.VITE_VIDEO_BASE as string | undefined) ?? `${MEDIA_BASE}/video`; // 本番は R2
 const GSI = "https://cyberjapandata.gsi.go.jp/xyz";
 const ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル</a>';
+const RIVER_ATTR = '<a href="https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-W05.html" target="_blank" rel="noopener">国土数値情報(河川データ)</a>(国土交通省)';
 const TRACK_GAP_MS = 60 * 60 * 1000;
 const MIN_DAY_ITEMS = 10; // これより少ない日(8/4 の 2 枚、7/31 の前日分など)は扱わない
 // 軌跡を切る条件: 連続する写真の間が 1 km 以上離れていたら線を引かない(速度は見ない)
 const JUMP_KM = 1.0;
+const DOT_ZOOM = 14; // これ以上寄ったら軌跡の線をやめて写真を点で出す
 const HOVER_RADIUS = 14; // px。線からこの距離以内でなぞりに反応
 const TAP_RADIUS = 28; // px。タップ用に広め
 const FULL_DELAY_MS = 180; // なぞっている間はサムネイル、止まったら大きい画像に差し替えるまでの時間
-const COLORS = { river: "#2a6f97", track: "#d93e2c", video: "#7a3fa0" };
+const COLORS = { river: "#2a6f97", track: "#d93e2c", video: "#7a3fa0", fav: "#ff5a7a", water: "#a9d3ea" };
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
@@ -52,6 +55,19 @@ let visible: MediaItem[] = []; // located をさらに写真/動画で絞った�
 let segments: MediaItem[][] = []; // 軌跡の区間(located)
 let currentDay: string | null = null;
 let currentKind: Kind = "all";
+let favOnly = false;
+const favs = new Set<string>(loadFavs()); // お気に入り(この端末のブラウザに保存)
+
+function loadFavs(): string[] {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem("fav-ids") ?? "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch { return []; }
+}
+function storeFavs() {
+  try { localStorage.setItem("fav-ids", JSON.stringify([...favs])); } catch { /* 保存できない環境では諦める */ }
+}
+function favCount(): number { return located.filter((i) => favs.has(i.id)).length; }
 let current: MediaItem | null = null;
 
 type View = "map" | "split" | "photo";
@@ -71,11 +87,11 @@ const map = new maplibregl.Map({
     glyphs: "/fonts/{fontstack}/{range}.pbf", // 日付ラベル用。0-255 の範囲だけ同梱
     sources: {
       pale: { type: "raster", tiles: [`${GSI}/pale/{z}/{x}/{y}.png`], tileSize: 256, minzoom: 5, maxzoom: 18, attribution: ATTR },
-      photo: { type: "raster", tiles: [`${GSI}/seamlessphoto/{z}/{x}/{y}.jpg`], tileSize: 256, minzoom: 14, maxzoom: 18, attribution: ATTR },
+      photo: { type: "raster", tiles: [`${GSI}/seamlessphoto/{z}/{x}/{y}.jpg`], tileSize: 256, minzoom: 2, maxzoom: 18, attribution: ATTR },
     },
     layers: [
       { id: "pale", type: "raster", source: "pale", paint: { "raster-saturation": -1, "raster-contrast": -0.15, "raster-opacity": 0.9 } },
-      { id: "photo", type: "raster", source: "photo", layout: { visibility: "none" }, minzoom: 13 },
+      { id: "photo", type: "raster", source: "photo", layout: { visibility: "none" } },
     ],
   },
   center: [141.3, 38.95],
@@ -153,22 +169,25 @@ function dayLabel(day: string): string {
 function applyFilter() {
   located = all.filter((it) => it.lat !== null && (currentDay === null || it.day === currentDay));
   located.forEach((it, i) => (it.li = i));
-  visible = located.filter((it) => currentKind === "all" || it.type === currentKind);
+  visible = located.filter((it) => (currentKind === "all" || it.type === currentKind) && (!favOnly || favs.has(it.id)));
   visible.forEach((it, i) => (it.vi = i));
   segments = trackSegments(located);
   (map.getSource("track") as GeoJSONSource).setData(trackGeoJSON(segments));
   (map.getSource("days") as GeoJSONSource).setData(daysGeoJSON(located));
   (map.getSource("videos") as GeoJSONSource).setData(pointsGeoJSON(located.filter((i) => i.type === "video")));
+  (map.getSource("photos") as GeoJSONSource).setData(pointsGeoJSON(located.filter((i) => i.type === "photo")));
+  (map.getSource("favs") as GeoJSONSource).setData(pointsGeoJSON(located.filter((i) => favs.has(i.id))));
   // 種類で絞っているときは、その素材だけを地図に出す(写真 = 軌跡、動画 = 紫の点)
-  for (const l of ["track-casing", "track"]) map.setLayoutProperty(l, "visibility", currentKind === "video" ? "none" : "visible");
+  for (const l of ["track-casing", "track", "photo-dots"]) map.setLayoutProperty(l, "visibility", currentKind === "video" ? "none" : "visible");
   map.setLayoutProperty("video-dots", "visibility", currentKind === "photo" ? "none" : "visible");
   screenDirty = true;
   // 種類チップに枚数(日付で絞った範囲の数)
   const photos = located.filter((i) => i.type === "photo").length;
   const counts: Record<Kind, number> = { all: located.length, photo: photos, video: located.length - photos };
-  $("#kinds").querySelectorAll<HTMLButtonElement>(".chip").forEach((b) => {
+  $("#kinds").querySelectorAll<HTMLButtonElement>(".chip[data-kind]").forEach((b) => {
     b.querySelector("b")!.textContent = String(counts[b.dataset.kind as Kind]);
   });
+  $("#chip-fav").querySelector("b")!.textContent = String(favCount());
   buildScrub();
 }
 
@@ -219,10 +238,12 @@ function showVideo(item: MediaItem | null) {
   if (item && item.type === "video") {
     photo.dataset.type = "video";
     photoVideo.poster = `${MEDIA_BASE}/web/${item.id}.jpg`;
-    photoVideo.src = `${MEDIA_BASE}/video/${item.id}.mp4`;
+    photoVideo.src = `${VIDEO_BASE}/${item.id}.mp4`;
     photoVideo.hidden = false;
     videoUi.hidden = false;
     $("#video-progress").style.width = "0";
+    $("#video-knob").style.left = "0";
+    $("#video-time").textContent = `0:00 / ${fmtClock(item.duration ?? 0)}`;
     photoVideo.play().catch(() => { /* 自動再生が拒否されたら再生ボタンを待つ */ });
   } else {
     photo.dataset.type = "photo";
@@ -238,15 +259,51 @@ $("#btn-play").addEventListener("click", () => photoVideo.play());
 photoVideo.addEventListener("play", () => { $("#photo").dataset.playing = "1"; });
 photoVideo.addEventListener("pause", () => { delete $("#photo").dataset.playing; });
 photoVideo.addEventListener("ended", () => { delete $("#photo").dataset.playing; });
-photoVideo.addEventListener("timeupdate", () => {
+function fmtClock(sec: number): string {
+  if (!isFinite(sec)) return "0:00";
+  const s = Math.floor(sec);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+function renderVideoTime() {
   const pct = photoVideo.duration ? (photoVideo.currentTime / photoVideo.duration) * 100 : 0;
   $("#video-progress").style.width = `${pct}%`;
+  $("#video-knob").style.left = `${pct}%`;
   $("#video-bar").setAttribute("aria-valuenow", String(Math.round(pct)));
-});
-$("#video-bar").addEventListener("click", (e) => {
-  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-  if (photoVideo.duration) photoVideo.currentTime = ((e.clientX - r.left) / r.width) * photoVideo.duration;
-});
+  $("#video-time").textContent = `${fmtClock(photoVideo.currentTime)} / ${fmtClock(photoVideo.duration)}`;
+}
+photoVideo.addEventListener("timeupdate", renderVideoTime);
+photoVideo.addEventListener("loadedmetadata", renderVideoTime);
+$("#btn-pp").addEventListener("click", () => { if (photoVideo.paused) photoVideo.play(); else photoVideo.pause(); });
+// シークバー: ドラッグ中は再生位置を追従させ、離した位置から再生を続ける
+{
+  const bar = $("#video-bar");
+  let seeking = false, wasPlaying = false;
+  const seekTo = (clientX: number) => {
+    const r = bar.getBoundingClientRect();
+    if (!photoVideo.duration) return;
+    photoVideo.currentTime = Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * photoVideo.duration;
+    renderVideoTime();
+  };
+  bar.addEventListener("pointerdown", (e) => {
+    seeking = true;
+    wasPlaying = !photoVideo.paused;
+    photoVideo.pause();
+    bar.setPointerCapture(e.pointerId);
+    seekTo(e.clientX);
+  });
+  bar.addEventListener("pointermove", (e) => { if (seeking) seekTo(e.clientX); });
+  const end = () => { if (!seeking) return; seeking = false; if (wasPlaying) photoVideo.play(); };
+  bar.addEventListener("pointerup", end);
+  bar.addEventListener("pointercancel", end);
+  bar.addEventListener("keydown", (e) => {
+    if (!photoVideo.duration) return;
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.stopPropagation();
+      photoVideo.currentTime = Math.max(0, Math.min(photoVideo.duration, photoVideo.currentTime + (e.key === "ArrowRight" ? 1 : -1)));
+      e.preventDefault();
+    }
+  });
+}
 $("#btn-mute").addEventListener("click", (e) => {
   const b = e.currentTarget as HTMLButtonElement;
   photoVideo.muted = !photoVideo.muted;
@@ -276,6 +333,7 @@ function setCurrent(item: MediaItem, follow: boolean) {
     if (item.gps !== "exif") parts.push("位置は前後の写真から推定");
     $("#photo-sub").textContent = parts.join("・");
     $("#photo-camera").textContent = cameraName(item);
+    $("#btn-fav").setAttribute("aria-pressed", String(favs.has(item.id)));
     ($("#btn-prev") as HTMLButtonElement).disabled = item.vi === 0;
     ($("#btn-next") as HTMLButtonElement).disabled = item.vi === visible.length - 1;
     (map.getSource("cursor") as GeoJSONSource).setData(pointGeoJSON(item));
@@ -288,6 +346,15 @@ function setCurrent(item: MediaItem, follow: boolean) {
     const inside = p.x > 40 && p.x < c.clientWidth - 40 && p.y > 48 && p.y < c.clientHeight - 40;
     if (!inside) map.easeTo({ center: [item.lon!, item.lat!], duration: 400 });
   }
+}
+
+/** フィルター変更後の表示を決める: 今の写真が残ればそれ、無ければ時刻の近いもの、何も無ければ閉じる */
+function reselectAfterFilter(keep: MediaItem | null) {
+  current = null;
+  if (view() === "map") return;
+  const next = keep ? toVisible(keep) : visible[0] ?? null;
+  if (next) setCurrent(next, true);
+  else { setView("map"); showVideo(null); }
 }
 
 function step(delta: number) {
@@ -310,26 +377,30 @@ function buildDayChips() {
       wrap.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", String(c === b)));
       applyFilter();
       fitTo(visible);
-      current = null; // 絞り込みで枚数・添字が変わるので、同じ写真でも表示を作り直す
-      if (visible[0] && view() !== "map") setCurrent(visible[0], false);
+      reselectAfterFilter(null); // 枚数・添字が変わるので表示を作り直す
     });
     return b;
   };
   wrap.appendChild(mk("全日", null));
   for (const d of days) wrap.appendChild(mk(dayLabel(d), d));
 
+  $("#chip-fav").addEventListener("click", (e) => {
+    const b = e.currentTarget as HTMLButtonElement;
+    favOnly = !favOnly;
+    b.setAttribute("aria-pressed", String(favOnly));
+    const keep = current;
+    applyFilter();
+    reselectAfterFilter(keep);
+  });
+
   const kinds = $("#kinds");
-  kinds.querySelectorAll<HTMLButtonElement>(".chip").forEach((b) => {
+  kinds.querySelectorAll<HTMLButtonElement>(".chip[data-kind]").forEach((b) => {
     b.addEventListener("click", () => {
       currentKind = b.dataset.kind as Kind;
-      kinds.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", String(c === b)));
-      const keep = view() !== "map" ? current : null; // 今の写真が残るならそのまま、消えるなら時刻の近いものへ
+      kinds.querySelectorAll(".chip[data-kind]").forEach((c) => c.setAttribute("aria-pressed", String(c === b)));
+      const keep = current; // 今の写真が残るならそのまま、消えるなら時刻の近いものへ
       applyFilter();
-      current = null;
-      if (view() === "map") return; // 地図のみのときはパネルを開かない(日付フィルターと同じ)
-      const next = keep ? toVisible(keep) : null;
-      if (next) setCurrent(next, true);
-      else if (visible[0]) setCurrent(visible[0], true);
+      reselectAfterFilter(keep);
     });
   });
 }
@@ -468,7 +539,7 @@ function nearestOnTrack(pt: { x: number; y: number }, radius: number): MediaItem
   refreshScreenPts();
   let best: MediaItem | null = null;
   let bestD = radius * radius;
-  if (currentKind === "video") {
+  if (currentKind === "video" || favOnly || map.getZoom() >= DOT_ZOOM) {
     for (const it of visible) {
       const dx = screenPts[it.li * 2] - pt.x, dy = screenPts[it.li * 2 + 1] - pt.y;
       const d = dx * dx + dy * dy;
@@ -494,7 +565,8 @@ function nearestOnTrack(pt: { x: number; y: number }, radius: number): MediaItem
 /** 軌跡上の点(located)を、種類フィルター後の一番時刻が近い項目に寄せる */
 function toVisible(item: MediaItem): MediaItem | null {
   if (visible.length === 0) return null;
-  if (currentKind === "all" || item.type === currentKind) return item;
+  const passes = (currentKind === "all" || item.type === currentKind) && (!favOnly || favs.has(item.id));
+  if (passes) return item;
   const t = Date.parse(item.time!);
   let lo = 0, hi = visible.length - 1;
   while (lo < hi) {
@@ -519,22 +591,48 @@ map.on("load", async () => {
   map.addSource("cursor", { type: "geojson", data: pointGeoJSON(null) });
   map.addSource("hover", { type: "geojson", data: pointGeoJSON(null) });
   map.addSource("videos", { type: "geojson", data: pointsGeoJSON([]) });
+  map.addSource("photos", { type: "geojson", data: pointsGeoJSON([]) });
+  map.addSource("favs", { type: "geojson", data: pointsGeoJSON([]) });
+  map.addSource("rivers", { type: "geojson", data: "/data/rivers.json", attribution: RIVER_ATTR });
+
+  // 通った川(山谷川・猿ヶ石川・北上川・旧北上川)。地図タイルの上、軌跡の下
+  map.addLayer({
+    id: "rivers", type: "line", source: "rivers",
+    layout: { "line-join": "round", "line-cap": "round" },
+    paint: { "line-color": COLORS.water, "line-width": ["interpolate", ["linear"], ["zoom"], 7, 2, 11, 5, 15, 12], "line-opacity": 0.85 },
+  });
 
   map.addLayer({
-    id: "track-casing", type: "line", source: "track",
+    id: "track-casing", type: "line", source: "track", maxzoom: DOT_ZOOM,
     layout: { "line-join": "round", "line-cap": "round" },
     paint: { "line-color": "#ffffff", "line-width": ["interpolate", ["linear"], ["zoom"], 8, 6, 14, 9], "line-opacity": 0.9 },
   });
   map.addLayer({
-    id: "track", type: "line", source: "track",
+    id: "track", type: "line", source: "track", maxzoom: DOT_ZOOM,
     layout: { "line-join": "round", "line-cap": "round" },
     paint: { "line-color": COLORS.track, "line-width": ["interpolate", ["linear"], ["zoom"], 8, 3, 14, 5], "line-opacity": 0.9 },
+  });
+  // 拡大時: 写真 1 枚ずつを赤い小さな点で(線では繋がない)
+  map.addLayer({
+    id: "photo-dots", type: "circle", source: "photos", minzoom: DOT_ZOOM,
+    paint: {
+      "circle-color": COLORS.track, "circle-radius": ["interpolate", ["linear"], ["zoom"], DOT_ZOOM, 3, 18, 6],
+      "circle-stroke-width": 1, "circle-stroke-color": "#ffffff", "circle-opacity": 0.9,
+    },
   });
   // 動画を撮った場所は紫の点(写真は赤い軌跡そのもの)
   map.addLayer({
     id: "video-dots", type: "circle", source: "videos",
     paint: {
       "circle-color": COLORS.video, "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 3, 14, 6],
+      "circle-stroke-width": 1.5, "circle-stroke-color": "#ffffff",
+    },
+  });
+  // お気に入りは金色の点(常に表示)
+  map.addLayer({
+    id: "fav-dots", type: "circle", source: "favs",
+    paint: {
+      "circle-color": COLORS.fav, "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 4, 14, 7],
       "circle-stroke-width": 1.5, "circle-stroke-color": "#ffffff",
     },
   });
@@ -587,6 +685,15 @@ $("#btn-layer").addEventListener("click", (e) => {
 $("#photo-img").addEventListener("click", () => { if (view() === "split") setView("photo"); });
 photoVideo.addEventListener("dblclick", () => { if (view() === "split") setView("photo"); });
 $("#btn-close").addEventListener("click", () => setView(view() === "photo" ? "split" : "map"));
+$("#btn-fav").addEventListener("click", () => {
+  if (!current) return;
+  if (favs.has(current.id)) favs.delete(current.id); else favs.add(current.id);
+  storeFavs();
+  $("#btn-fav").setAttribute("aria-pressed", String(favs.has(current.id)));
+  (map.getSource("favs") as GeoJSONSource).setData(pointsGeoJSON(located.filter((i) => favs.has(i.id))));
+  $("#chip-fav").querySelector("b")!.textContent = String(favCount());
+  if (favOnly) { const keep = current; applyFilter(); reselectAfterFilter(keep); }
+});
 $("#btn-prev").addEventListener("click", () => step(-1));
 $("#btn-next").addEventListener("click", () => step(1));
 document.addEventListener("keydown", (e) => {
