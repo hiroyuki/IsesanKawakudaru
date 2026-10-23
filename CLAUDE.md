@@ -15,7 +15,7 @@
 - 素材フォルダ `2017川下りALL/` と生成物 `media/` は git 管理外。絶対に git add しない(14GB)。
 - 地図は国土地理院の地理院タイルのみ使う。Google Maps / Mapbox は使わない(課金・カード登録が必要なため)。
 - 撮影時刻はすべて JST に揃える。写真の EXIF `DateTimeOriginal` は JST。動画はカメラごとに違う: iPhone は `com.apple.quicktime.creationdate`(+0900 付き)を使う。Canon XC10(MVI_)と GoPro は `creation_time` が Z 付きでも実体は JST。それ以外(UUID 名の .mov など)は本当に UTC なので +9h。
-- GPS のない素材(Canon XC10、動画)は前後の GPS 付き写真から時刻補完する(`gps: "interp" | "nearest"`)。写真の説明に「位置は前後の写真から推定」と出す。
+- GPS のない素材(Canon XC10、動画)は前後 2 時間以内の GPS 付き写真から時刻補完する(`gps: "interp" | "nearest"`)。2 時間以内に無ければ同じ日の一番近い写真の位置を使う(日はまたがない)。写真の説明に「位置は前後の写真から推定」と出す。
 - 地図には写真のピンを置かない。軌跡(赤線)だけを描き、軌跡をなぞる/タップすると上半分にその場所の写真が出る(ユーザー決定)。
 - 位置付きの写真が 10 枚未満の日(8/4、7/31)は表示しない。3 秒以下の動画も出さない(build_media.py の MIN_VIDEO_SEC)。連続する写真の間が 1km 以上離れている区間は軌跡の線を引かない(速度は見ない)。
 - 地図はモノトーン(`raster-saturation: -1`)。
