@@ -8,6 +8,8 @@
   --river: #2a6f97;
   --track: #d93e2c;
   --video: #7a3fa0;
+  --fav: #ff5a7a;
+  --water: #a9d3ea;
   --photo-bg: #101316;
   /* 書体は游ゴシック(ユーザー指定)。iPhone には無いのでヒラギノ、Android は Web フォントの Zen Kaku Gothic に落ちる */
   --body: "Yu Gothic", "YuGothic", "游ゴシック体", "游ゴシック", "Hiragino Sans", "Zen Kaku Gothic New", sans-serif;
@@ -17,7 +19,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #161b1f; --surface: #1f262c; --fg: #e8e4da; --muted: #a0a9b1; --line: #343d45;
-    --river: #7cb8d9; --track: #f0654f; --video: #b98ad9; color-scheme: dark;
+    --river: #7cb8d9; --track: #f0654f; --video: #b98ad9; --fav: #ff7a94; --water: #3d6d8a; color-scheme: dark;
   }
 }
 * { box-sizing: border-box; }
@@ -46,30 +48,42 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-w
 /* 中央の再生ボタン。再生中は消える */
 #btn-play {
   position: absolute; z-index: 2; left: 50%; top: 50%; width: 72px; height: 72px; margin: -36px 0 0 -36px;
-  border-radius: 50%; border: 2px solid rgba(255,255,255,.8); background: rgba(0,0,0,.45); cursor: pointer;
-  backdrop-filter: blur(3px);
+  border-radius: 50%; border: 1.5px solid rgba(255,255,255,.9); background: transparent; cursor: pointer;
 }
 #btn-play::after {
   content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-40%, -50%);
   border-left: 24px solid #fff; border-top: 15px solid transparent; border-bottom: 15px solid transparent;
 }
 #photo[data-playing="1"] #btn-play { display: none; }
-/* 進行バー(写真の下端) */
-#video-bar { position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(255,255,255,.25); cursor: pointer; }
-#video-bar::before { content: ""; position: absolute; left: 0; right: 0; top: -12px; bottom: -4px; } /* タップしやすく */
-#video-progress { height: 100%; width: 0; background: var(--video); }
-#btn-mute {
-  position: absolute; z-index: 2; right: calc(56px + max(8px, env(safe-area-inset-right, 0px))); bottom: 14px;
-  width: 36px; height: 36px; border-radius: 50%; border: 1px solid rgba(255,255,255,.35); background: rgba(0,0,0,.5); cursor: pointer;
+/* 操作バー(動画の下端): 再生/一時停止・時間・シーク・音 */
+#video-ctl {
+  position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; height: 44px;
+  display: flex; align-items: center; gap: 10px; color: #fff;
+  padding: 0 calc(52px + max(12px, env(safe-area-inset-right, 0px))) 0 max(12px, env(safe-area-inset-left, 0px));
+  background: linear-gradient(to top, rgba(0,0,0,.55), transparent);
 }
-#btn-mute::before { content: "♪"; color: #fff; font-size: 1rem; line-height: 1; }
-#btn-mute[aria-pressed="true"]::before { content: "♪"; text-decoration: line-through; opacity: .6; }
+#video-ctl button { width: 32px; height: 32px; border: 0; background: transparent; color: #fff; cursor: pointer; padding: 0; display: grid; place-items: center; flex: 0 0 auto; }
+#btn-pp::before { content: ""; border-left: 14px solid #fff; border-top: 8px solid transparent; border-bottom: 8px solid transparent; }
+#photo[data-playing="1"] #btn-pp::before { border: 0; width: 12px; height: 16px; border-left: 4px solid #fff; border-right: 4px solid #fff; box-sizing: border-box; }
+#video-time { font-size: 0.75rem; font-variant-numeric: tabular-nums; white-space: nowrap; opacity: .9; }
+#video-bar { position: relative; flex: 1 1 auto; height: 24px; cursor: pointer; touch-action: none; }
+#video-bar::before { content: ""; position: absolute; left: 0; right: 0; top: 11px; height: 2px; background: rgba(255,255,255,.4); }
+#video-progress { position: absolute; left: 0; top: 11px; height: 2px; width: 0; background: #fff; }
+#video-knob { position: absolute; top: 6px; left: 0; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: #fff; }
+#video-bar:focus-visible { outline: 1px solid #fff; outline-offset: -2px; }
+#btn-mute svg { width: 22px; height: 22px; fill: none; stroke: #fff; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+#btn-mute .spk-body { fill: #fff; }
+#btn-mute .spk-off { display: none; }
+#btn-mute[aria-pressed="true"] .spk-wave { display: none; }
+#btn-mute[aria-pressed="true"] .spk-off { display: block; }
+#photo[data-type="video"] #btn-fav { bottom: 0; } /* 操作バー(高さ 44px)の中央に揃える */
 #photo[data-type="video"] #photo-video { cursor: pointer; }
-#photo[data-type="video"] #photo-caption { padding-bottom: 14px; }
+#photo[data-type="video"] #photo-caption { padding-bottom: 50px; }
+#photo-caption { padding-right: 110px; }
 #btn-close {
   position: absolute; z-index: 3; top: 8px; right: max(8px, env(safe-area-inset-right, 0px));
   width: 40px; height: 40px; border: 0; border-radius: 50%; cursor: pointer;
-  background: rgba(0,0,0,.5); color: #fff; font-size: 1.5rem; line-height: 1; border: 1px solid rgba(255,255,255,.35);
+  background: transparent; color: #fff; font-size: 1.6rem; line-height: 1;
 }
 #btn-close:focus-visible { outline: 2px solid #fff; }
 #title {
@@ -81,9 +95,17 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-w
 #photo-camera {
   position: absolute; z-index: 1; top: 14px; right: calc(56px + max(8px, env(safe-area-inset-right, 0px)));
   padding: 4px 10px; border-radius: 999px; font-size: 0.75rem; letter-spacing: 0.02em;
-  background: rgba(0,0,0,.45); color: #fff; border: 1px solid rgba(255,255,255,.35); backdrop-filter: blur(4px);
+  color: #fff; border: 1px solid rgba(255,255,255,.5);
 }
 #photo-camera:empty { display: none; }
+/* ミニマル: 輪郭だけのハート。登録で塗る。背景・影・アニメーション無し */
+#btn-fav {
+  position: absolute; z-index: 2; right: max(12px, env(safe-area-inset-right, 0px)); bottom: 14px;
+  width: 44px; height: 44px; border: 0; background: transparent; display: grid; place-items: center; cursor: pointer; padding: 0;
+}
+#btn-fav svg { width: 24px; height: 24px; fill: transparent; stroke: #fff; stroke-width: 1.8; stroke-linejoin: round; }
+#btn-fav[aria-pressed="true"] svg { fill: var(--fav); stroke: var(--fav); }
+#btn-fav:focus-visible { outline: 1px solid #fff; outline-offset: -4px; }
 #photo-caption {
   position: absolute; z-index: 1; left: 0; right: 0; bottom: 0;
   padding: 28px max(14px, env(safe-area-inset-right, 0px)) 10px max(14px, env(safe-area-inset-left, 0px));
@@ -94,7 +116,7 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-w
 #photo-nav { position: absolute; z-index: 2; inset: 0; display: flex; justify-content: space-between; align-items: center; pointer-events: none; padding: 0 6px; }
 #photo-nav button {
   pointer-events: auto; width: 40px; height: 56px; border: 0; border-radius: 8px; cursor: pointer;
-  background: rgba(0,0,0,.35); color: #fff; font-size: 1.8rem; line-height: 1; opacity: .8;
+  background: transparent; color: #fff; font-size: 1.8rem; line-height: 1; opacity: .7;
 }
 #photo-nav button:hover { opacity: 1; }
 #photo-nav button:disabled { opacity: .2; cursor: default; }
@@ -130,8 +152,8 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-w
 /* ---- ホバーのサムネイル ---- */
 #hover {
   position: fixed; z-index: 5; left: 0; top: 0; width: 180px; pointer-events: none;
-  background: var(--surface); color: var(--fg); border-radius: 8px; padding: 4px;
-  box-shadow: 0 4px 16px rgba(0,0,0,.3); will-change: transform;
+  background: var(--surface); color: var(--fg); border-radius: 8px; padding: 4px; border: 1px solid var(--line);
+  will-change: transform;
 }
 #hover[hidden] { display: none; }
 #hover img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 5px; background: #ccc; }
@@ -157,10 +179,14 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-w
 #kinds .chip[data-kind="video"]::before { width: 9px; height: 9px; border-radius: 50%; background: var(--video); border: 1.5px solid #fff; box-sizing: border-box; }
 #kinds .chip[aria-pressed="true"][data-kind="photo"]::before { background: #fff; }
 #kinds .chip[aria-pressed="true"][data-kind="video"]::before { border-color: #fff; }
+#chip-fav { color: var(--fav); display: inline-flex; align-items: center; gap: 4px; }
+#chip-fav svg { width: 13px; height: 13px; fill: transparent; stroke: currentColor; stroke-width: 2.2; stroke-linejoin: round; }
+#chip-fav[aria-pressed="true"] { background: var(--fav); border-color: var(--fav); color: #fff; }
+#chip-fav[aria-pressed="true"] svg { fill: #fff; stroke: #fff; }
 .chip {
   flex: 0 0 auto; font: inherit; font-size: 0.85rem; padding: 4px 11px; border-radius: 999px;
   border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer;
-  font-variant-numeric: tabular-nums; box-shadow: 0 1px 3px rgba(0,0,0,.12);
+  font-variant-numeric: tabular-nums;
 }
 .chip[aria-pressed="true"] { background: var(--river); border-color: var(--river); color: #fff; }
 .chip:focus-visible, button:focus-visible { outline: 2px solid var(--track); outline-offset: 2px; }
@@ -168,5 +194,5 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-w
   position: absolute; z-index: 2; right: max(10px, env(safe-area-inset-right, 0px)); bottom: 10px;
   display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
 }
-#toolbar button { font: inherit; font-size: 0.85rem; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+#toolbar button { font: inherit; font-size: 0.85rem; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; }
 #toolbar button[aria-pressed="true"] { background: var(--river); border-color: var(--river); color: #fff; }

@@ -15,10 +15,15 @@
         <video id="photo-video" playsinline preload="metadata" hidden></video>
         <div id="video-ui" hidden>
           <button id="btn-play" type="button" aria-label="再生"></button>
-          <div id="video-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="video-progress"></div></div>
-          <button id="btn-mute" type="button" aria-label="音を消す" aria-pressed="false"></button>
+          <div id="video-ctl">
+            <button id="btn-pp" type="button" aria-label="再生 / 一時停止"></button>
+            <span id="video-time">0:00 / 0:00</span>
+            <div id="video-bar" role="slider" aria-label="再生位置" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0"><div id="video-progress"></div><div id="video-knob"></div></div>
+            <button id="btn-mute" type="button" aria-label="音を消す" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="spk-body" d="M4 9v6h4l5 4V5L8 9H4z"/><path class="spk-wave" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/><path class="spk-off" d="M16 9l5 6M21 9l-5 6"/></svg></button>
+          </div>
         </div>
         <div id="photo-camera" aria-label="カメラ"></div>
+        <button id="btn-fav" type="button" aria-pressed="false" aria-label="お気に入りに登録"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.2-4.6-9.6-9.1C.7 8.6 2.3 4.5 6.1 4.1c2.2-.2 3.9 1 4.9 2.4 1-1.4 2.7-2.6 4.9-2.4 3.8.4 5.4 4.5 3.7 7.8C19.2 16.4 12 21 12 21z"/></svg></button>
         <button id="btn-close" type="button" aria-label="閉じる">×</button>
         <div id="photo-caption">
           <div id="photo-time">—</div>
@@ -48,6 +53,7 @@
           <button class="chip" type="button" data-kind="all" aria-pressed="true">すべて <b>0</b></button>
           <button class="chip" type="button" data-kind="photo" aria-pressed="false">写真 <b>0</b></button>
           <button class="chip" type="button" data-kind="video" aria-pressed="false">動画 <b>0</b></button>
+          <button class="chip" type="button" id="chip-fav" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.2-4.6-9.6-9.1C.7 8.6 2.3 4.5 6.1 4.1c2.2-.2 3.9 1 4.9 2.4 1-1.4 2.7-2.6 4.9-2.4 3.8.4 5.4 4.5 3.7 7.8C19.2 16.4 12 21 12 21z"/></svg>お気に入り <b>0</b></button>
         </div>
         <div id="toolbar">
           <button id="btn-layer" type="button" aria-pressed="false">航空写真</button>

@@ -20,7 +20,8 @@
 - 位置付きの写真が 10 枚未満の日(8/4、7/31)は表示しない。連続する写真の間が 1km 以上離れている区間は軌跡の線を引かない(速度は見ない)。
 - 地図はモノトーン(`raster-saturation: -1`)。
 - `web/public/data/media.json` は `scripts/build_media.py` の生成物。手で編集しない。
-- 日本語 UI。地理院タイルの出典表示(リンク付き)を必ず残す。
+- 日本語 UI。地理院タイルと国土数値情報(河川データ)の出典表示(リンク付き)を必ず残す。
+- お気に入りは今のところ端末ごと(localStorage)。コメント機能のログイン実装後に共有化を検討。
 
 ## ファイル構成
 
@@ -29,8 +30,10 @@ CLAUDE_BASICS/            共通ルール・スキル(submodule)
 .claude/skills/           CLAUDE_BASICS/skills への symlink
 scripts/build_media.py    素材 → media.json + サムネイル(400px)/閲覧用(1600px)/動画 720p 生成。data/exclude.json の id に hidden を付ける
 data/exclude.json         選別で除外した素材の id(web/curate.html で編集)。コミットする
+scripts/build_rivers.py   国土数値情報 河川データ(W05)から山谷川・猿ヶ石川・北上川・旧北上川を web/public/data/rivers.json に切り出す
 web/                      Vite + TypeScript + MapLibre GL JS(静的サイト、Cloudflare Pages 配信予定)
   public/data/media.json  全素材のメタデータ(生成物、コミットする)
+  public/data/rivers.json 通った川の中心線 GeoJSON(生成物、コミットする。出典: 国土数値情報(河川データ))
   public/fonts/           地図ラベル用グリフ(Open Sans Bold の 0-255 だけ)
   src/main.ts             上半分=写真 / 下半分=地図。軌跡・日付ラベル・なぞり/タップで写真切替・前後送り・日付フィルタ
   src/style.css           上下二分のスマホ優先レイアウト
