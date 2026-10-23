@@ -17,11 +17,12 @@
 - 撮影時刻はすべて JST に揃える。写真の EXIF `DateTimeOriginal` は JST。動画はカメラごとに違う: iPhone は `com.apple.quicktime.creationdate`(+0900 付き)を使う。Canon XC10(MVI_)と GoPro は `creation_time` が Z 付きでも実体は JST。それ以外(UUID 名の .mov など)は本当に UTC なので +9h。
 - GPS のない素材(Canon XC10、動画)は前後の GPS 付き写真から時刻補完する(`gps: "interp" | "nearest"`)。写真の説明に「位置は前後の写真から推定」と出す。
 - 地図には写真のピンを置かない。軌跡(赤線)だけを描き、軌跡をなぞる/タップすると上半分にその場所の写真が出る(ユーザー決定)。
-- 位置付きの写真が 10 枚未満の日(8/4、7/31)は表示しない。連続する写真の間が 1km 以上離れている区間は軌跡の線を引かない(速度は見ない)。
+- 位置付きの写真が 10 枚未満の日(8/4、7/31)は表示しない。3 秒以下の動画も出さない(build_media.py の MIN_VIDEO_SEC)。連続する写真の間が 1km 以上離れている区間は軌跡の線を引かない(速度は見ない)。
 - 地図はモノトーン(`raster-saturation: -1`)。
 - `web/public/data/media.json` は `scripts/build_media.py` の生成物。手で編集しない。
 - 日本語 UI。地理院タイルと国土数値情報(河川データ)の出典表示(リンク付き)を必ず残す。
 - お気に入りは今のところ端末ごと(localStorage)。コメント機能のログイン実装後に共有化を検討。
+- 写真・動画ごとの URL は `/p/<id>`。選択時に history.replaceState で反映し、起動時にその id を開く。
 
 ## ファイル構成
 
@@ -38,7 +39,9 @@ web/                      Vite + TypeScript + MapLibre GL JS(静的サイト、C
   src/main.ts             上半分=写真 / 下半分=地図。軌跡・日付ラベル・なぞり/タップで写真切替・前後送り・日付フィルタ
   src/style.css           上下二分のスマホ優先レイアウト
   curate.html, src/curate.ts  開発専用の選別ページ(http://localhost:5173/curate.html)。本番ビルドには含めない
-  vite.config.ts          開発時 /media を localhost:8788(npm run media)へプロキシ
+  functions/p/[id].js     Pages Function。/p/<id> で写真ごとの OG 情報(タイトル・画像)を index.html に差し込んで返す
+  public/og.jpg           サイト全体の OG 画像(1200×630、8/6 北上川のカヤック)
+  vite.config.ts          開発時 /media を localhost:8788(npm run media)へプロキシ。/p/<id> は SPA フォールバックで index.html
   .env.development        VITE_MEDIA_BASE=/media(本番は .env.production で R2 の URL)
 media/ (git 外)           thumb/ web/ の縮小画像と video/ の 720p mp4。本番は Cloudflare R2 に置く
 2017川下りALL/ (git 外)   元素材

@@ -39,6 +39,8 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-w
 
 /* ---- 上半分: 写真 ---- */
 #photo { position: relative; background: var(--photo-bg); overflow: hidden; min-height: 0; touch-action: pan-y; } /* 横スワイプは写真送りに使う */
+#app[data-view="photo"] #photo { touch-action: none; } /* フルスクリーンではピンチを自前で扱う */
+#photo-img { transform-origin: center center; }
 #photo-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--photo-bg); user-select: none; -webkit-user-select: none; cursor: zoom-in; }
 #app[data-view="photo"] #photo-img { cursor: default; }
 #photo-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--photo-bg); }
@@ -80,6 +82,16 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-w
 #video-knob { position: absolute; top: 6px; left: 0; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: #fff; }
 #video-bar:focus-visible { outline: 1px solid #fff; outline-offset: -2px; }
 #btn-mute svg { width: 22px; height: 22px; fill: none; stroke: #fff; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+/* フルスクリーン切替。右上、保存の左 */
+#btn-fs {
+  position: absolute; z-index: 3; top: 8px; right: calc(120px + max(8px, env(safe-area-inset-right, 0px)));
+  width: 40px; height: 40px; border: 0; background: transparent; display: grid; place-items: center; cursor: pointer; padding: 0;
+}
+#btn-fs:focus-visible { outline: 1px solid #fff; outline-offset: -4px; }
+#btn-fs svg { width: 20px; height: 20px; fill: none; stroke: #fff; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+#btn-fs .fs-out { display: none; }
+#app[data-view="photo"] #btn-fs .fs-in { display: none; }
+#app[data-view="photo"] #btn-fs .fs-out { display: block; }
 #btn-mute .spk-body { fill: #fff; }
 #btn-mute .spk-off { display: none; }
 #btn-mute[aria-pressed="true"] .spk-wave { display: none; }
@@ -87,7 +99,7 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-w
 #photo[data-type="video"] #btn-fav { bottom: 0; } /* 操作バー(高さ 44px)の中央に揃える */
 #photo[data-type="video"] #photo-video { cursor: pointer; }
 #photo[data-type="video"] #photo-caption { padding-bottom: 50px; }
-#photo-caption { padding-right: 110px; }
+#photo-caption { padding-right: 70px; }
 #btn-close {
   position: absolute; z-index: 3; top: 8px; right: max(8px, env(safe-area-inset-right, 0px));
   width: 40px; height: 40px; border: 0; border-radius: 50%; cursor: pointer;
@@ -101,7 +113,7 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-w
 }
 #title span { display: block; font-size: 0.7rem; font-weight: 500; font-family: var(--body); color: var(--muted); }
 #photo-camera {
-  position: absolute; z-index: 1; top: 14px; right: calc(56px + max(8px, env(safe-area-inset-right, 0px)));
+  position: absolute; z-index: 1; top: 14px; left: max(12px, env(safe-area-inset-left, 0px));
   padding: 4px 10px; border-radius: 999px; font-size: 0.75rem; letter-spacing: 0.02em;
   color: #fff; border: 1px solid rgba(255,255,255,.5);
 }
@@ -113,6 +125,22 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-w
 }
 #btn-fav svg { width: 24px; height: 24px; fill: transparent; stroke: #fff; stroke-width: 1.8; stroke-linejoin: round; }
 #btn-fav[aria-pressed="true"] svg { fill: var(--fav); stroke: var(--fav); }
+/* 共有(上矢印)。右上、× の左 */
+#btn-share {
+  position: absolute; z-index: 3; top: 8px; right: calc(40px + max(8px, env(safe-area-inset-right, 0px)));
+  width: 40px; height: 40px; border: 0; background: transparent; display: grid; place-items: center; cursor: pointer; padding: 0;
+}
+#btn-share svg { width: 22px; height: 22px; fill: none; stroke: #fff; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+/* 保存(下矢印)。共有の左 */
+#btn-download {
+  position: absolute; z-index: 3; top: 8px; right: calc(80px + max(8px, env(safe-area-inset-right, 0px)));
+  width: 40px; height: 40px; border: 0; background: transparent; display: grid; place-items: center; cursor: pointer; padding: 0;
+}
+#btn-download svg { width: 22px; height: 22px; fill: none; stroke: #fff; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+#btn-download:focus-visible { outline: 1px solid #fff; outline-offset: -4px; }
+#btn-share:focus-visible { outline: 1px solid #fff; outline-offset: -4px; }
+#share-note { position: absolute; z-index: 3; top: 52px; right: max(12px, env(safe-area-inset-right, 0px)); color: #fff; font-size: 0.75rem; }
+#share-note:empty { display: none; }
 #btn-fav:focus-visible { outline: 1px solid #fff; outline-offset: -4px; }
 #photo-caption {
   position: absolute; z-index: 1; left: 0; right: 0; bottom: 0;
