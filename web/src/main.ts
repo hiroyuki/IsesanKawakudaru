@@ -83,7 +83,12 @@ type View = "map" | "split" | "photo";
 const app = document.getElementById("app")!;
 function setView(v: View) {
   app.dataset.view = v;
+  zoomReset();
+  if (v === "map" && !photoVideo.paused) photoVideo.pause(); // 地図だけにしたら動画は止める(裏で鳴らさない)
+  if (v === "map" && location.pathname !== "/") history.replaceState(null, "", "/");
   $("#btn-close").setAttribute("aria-label", v === "photo" ? "分割表示に戻る" : "地図だけにする");
+  $("#btn-fs").setAttribute("aria-pressed", String(v === "photo"));
+  $("#btn-fs").setAttribute("aria-label", v === "photo" ? "フルスクリーンを解除" : "フルスクリーン");
   if (v !== "photo") screenDirty = true; // 地図の大きさが変わるので画面座標を取り直す
 }
 const view = () => app.dataset.view as View;
@@ -289,6 +294,8 @@ for (const ev of ["canplay", "playing", "seeked", "pause", "error", "emptied"]) 
 photoVideo.addEventListener("timeupdate", renderVideoTime);
 photoVideo.addEventListener("loadedmetadata", renderVideoTime);
 $("#btn-pp").addEventListener("click", () => { if (photoVideo.paused) photoVideo.play(); else photoVideo.pause(); });
+// フルスクリーン(写真のみ表示)との切り替え。再生は止めない
+$("#btn-fs").addEventListener("click", () => setView(view() === "photo" ? "split" : "photo"));
 // シークバー: ドラッグ中は再生位置を追従させ、離した位置から再生を続ける
 {
   const bar = $("#video-bar");
@@ -330,6 +337,7 @@ $("#btn-mute").addEventListener("click", (e) => {
 function setCurrent(item: MediaItem, follow: boolean) {
   const changed = current !== item;
   current = item;
+  if (changed) zoomReset();
   if (view() === "map") setView("split"); // 写真が選ばれたら上半分を開く
   if (changed) {
     // なぞっている最中はサムネイル(軽い)。少し止まったら大きい画像に差し替える
@@ -354,6 +362,7 @@ function setCurrent(item: MediaItem, follow: boolean) {
     $("#photo-sub").textContent = parts.join("・");
     $("#photo-camera").textContent = cameraName(item);
     $("#btn-fav").setAttribute("aria-pressed", String(favs.has(item.id)));
+    history.replaceState(null, "", `/p/${item.id}`); // 写真ごとの URL(共有用)
     ($("#btn-prev") as HTMLButtonElement).disabled = item.vi === 0;
     ($("#btn-next") as HTMLButtonElement).disabled = item.vi === visible.length - 1;
     (map.getSource("cursor") as GeoJSONSource).setData(pointGeoJSON(item));
@@ -657,6 +666,13 @@ map.on("load", async () => {
   buildFilters();
   applyFilter();
   fitTo(visible);
+  const m = /^\/p\/([a-z0-9_]+)$/.exec(location.pathname);
+  const start = m ? all.find((i) => i.id === m[1]) : undefined;
+  if (start && start.lat !== null) {
+    const shown = toVisible(start) ?? start;
+    setCurrent(shown, false);
+    map.once("idle", () => map.easeTo({ center: [shown.lon!, shown.lat!], zoom: 13, duration: 800 }));
+  }
 
   const canHover = window.matchMedia("(hover: hover)").matches;
   map.on("mousemove", (e) => {
@@ -698,6 +714,44 @@ $("#btn-fav").addEventListener("click", () => {
   updateFilterLabels();
   if (favOnly) { const keep = current; applyFilter(); reselectAfterFilter(keep); }
 });
+// 保存: 配信している 1600px JPEG / 720p mp4 を日時付きのファイル名で
+$("#btn-download").addEventListener("click", async () => {
+  if (!current) return;
+  const it = current;
+  const isVideo = it.type === "video";
+  const url = isVideo ? `${VIDEO_BASE}/${it.id}.mp4` : `${MEDIA_BASE}/web/${it.id}.jpg`;
+  const t = it.time ? jst(it.time) : null;
+  const stamp = t ? `2017-${String(t.month).padStart(2, "0")}-${String(t.day).padStart(2, "0")}_${String(t.hour).padStart(2, "0")}${String(t.minute).padStart(2, "0")}_` : "";
+  const name = `${stamp}${it.file.replace(/\.[^.]+$/, "")}.${isVideo ? "mp4" : "jpg"}`;
+  const note = $("#share-note");
+  try {
+    note.textContent = "準備中…";
+    const blob = await (await fetch(url)).blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    window.setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+    note.textContent = "";
+  } catch {
+    window.open(url, "_blank", "noopener"); // 取れなければ新しいタブで開く(そこから保存できる)
+    note.textContent = "";
+  }
+});
+$("#btn-share").addEventListener("click", async () => {
+  if (!current) return;
+  const url = `${location.origin}/p/${current.id}`;
+  const title = `${fmtTime(current.time)} — 2017 川下り`;
+  const note = $("#share-note");
+  try {
+    if (navigator.share) { await navigator.share({ title, url }); return; }
+    await navigator.clipboard.writeText(url);
+    note.textContent = "リンクをコピーしました";
+  } catch {
+    note.textContent = url; // コピーできない環境では URL をそのまま出す(選択してコピーできる)
+  }
+  window.setTimeout(() => { note.textContent = ""; }, 2500);
+});
 $("#btn-prev").addEventListener("click", () => step(-1));
 $("#btn-next").addEventListener("click", () => step(1));
 document.addEventListener("keydown", (e) => {
@@ -724,10 +778,92 @@ document.addEventListener("keydown", (e) => {
   });
   const end = () => {
     if (id === -1) return;
-    const go = horizontal && Math.abs(dx) > 60 ? (dx < 0 ? 1 : -1) : 0;
+    const go = horizontal && Math.abs(dx) > 60 && !zoomActive() ? (dx < 0 ? 1 : -1) : 0;
     id = -1;
     if (go) step(go);
   };
   el.addEventListener("pointerup", end);
   el.addEventListener("pointercancel", () => { id = -1; }); // 中断(OS のジェスチャ等)は切り替えない
+}
+
+// ---- フルスクリーンのピンチズーム(写真のみ) ---------------------------------------
+// 2 本指でピンチ、拡大中は 1 本指でドラッグ移動、ダブルタップで 2 倍/等倍。拡大中は写真送りのスワイプを止める
+let zScale = 1, zTx = 0, zTy = 0;
+const zPointers = new Map<number, { x: number; y: number }>();
+let zPinch: { dist: number; scale: number; cx: number; cy: number; tx: number; ty: number } | null = null;
+let zDrag: { x: number; y: number; tx: number; ty: number } | null = null;
+let lastTap = 0; // 直前のタップ(動かさずに離した)の時刻。ダブルタップ判定用
+let tapStart: { x: number; y: number; t: number } | null = null;
+
+function zoomActive(): boolean { return zScale > 1 || zPointers.size >= 2; }
+function zoomApply() {
+  photoImg.style.transform = zScale === 1 ? "" : `translate(${zTx}px, ${zTy}px) scale(${zScale})`;
+}
+function zoomReset() { zScale = 1; zTx = 0; zTy = 0; zPinch = null; zDrag = null; zPointers.clear(); zoomApply(); }
+function zoomClamp() {
+  // はみ出しすぎないように移動量を抑える(拡大した分の半分まで)
+  const r = photoImg.getBoundingClientRect();
+  const maxX = Math.max(0, (r.width - r.width / zScale) / 2), maxY = Math.max(0, (r.height - r.height / zScale) / 2);
+  zTx = Math.max(-maxX, Math.min(maxX, zTx));
+  zTy = Math.max(-maxY, Math.min(maxY, zTy));
+}
+{
+  const el = $("#photo");
+  const dist = () => { const [a, b] = [...zPointers.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+  const mid = () => { const [a, b] = [...zPointers.values()]; return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; };
+  el.addEventListener("pointerdown", (e) => {
+    if (view() !== "photo" || e.pointerType !== "touch" || current?.type !== "photo") return;
+    if ((e.target as HTMLElement).closest("button")) return;
+    zPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (zPointers.size === 2) {
+      const m = mid();
+      zPinch = { dist: dist(), scale: zScale, cx: m.x, cy: m.y, tx: zTx, ty: zTy };
+      zDrag = null;
+      tapStart = null; lastTap = 0; // ピンチはタップ扱いにしない
+    } else if (zPointers.size === 1) {
+      if (zScale > 1) zDrag = { x: e.clientX, y: e.clientY, tx: zTx, ty: zTy };
+      tapStart = { x: e.clientX, y: e.clientY, t: performance.now() };
+    }
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (!zPointers.has(e.pointerId)) return;
+    zPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (zPinch && zPointers.size >= 2) {
+      const m = mid();
+      zScale = Math.max(1, Math.min(5, (zPinch.scale * dist()) / zPinch.dist));
+      zTx = zPinch.tx + (m.x - zPinch.cx);
+      zTy = zPinch.ty + (m.y - zPinch.cy);
+      zoomClamp();
+      zoomApply();
+    } else if (zDrag && zPointers.size === 1) {
+      zTx = zDrag.tx + (e.clientX - zDrag.x);
+      zTy = zDrag.ty + (e.clientY - zDrag.y);
+      zoomClamp();
+      zoomApply();
+    }
+  });
+  const up = (e: PointerEvent) => {
+    // ダブルタップ(動かさず 300ms 以内に 2 回): 2 倍 ↔ 等倍
+    if (tapStart && zPointers.size === 1 && Math.hypot(e.clientX - tapStart.x, e.clientY - tapStart.y) < 10) {
+      const now = performance.now();
+      if (now - lastTap < 300) {
+        if (zScale > 1) { zScale = 1; zTx = 0; zTy = 0; }
+        else {
+          zScale = 2;
+          const r = el.getBoundingClientRect();
+          zTx = r.left + r.width / 2 - e.clientX; zTy = r.top + r.height / 2 - e.clientY;
+          zoomClamp();
+        }
+        zoomApply();
+        lastTap = 0;
+      } else lastTap = now;
+    }
+    tapStart = null;
+    zPointers.delete(e.pointerId);
+    if (zPointers.size < 2) zPinch = null;
+    if (zPointers.size === 0) { zDrag = null; if (zScale < 1.05) { zScale = 1; zTx = 0; zTy = 0; zoomApply(); } }
+    else if (zPointers.size === 1 && zScale > 1) { const p = [...zPointers.values()][0]; zDrag = { x: p.x, y: p.y, tx: zTx, ty: zTy }; }
+  };
+  el.addEventListener("pointerup", up);
+  el.addEventListener("pointercancel", up);
 }

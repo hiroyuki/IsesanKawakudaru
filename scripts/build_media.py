@@ -32,6 +32,7 @@ PHOTO_EXT = {".jpg", ".jpeg"}
 VIDEO_EXT = {".mp4", ".mov"}
 THUMB_PX = 400
 WEB_PX = 1600
+MIN_VIDEO_SEC = 3.0  # これ以下の長さの動画は出さない(hidden)。ユーザー指定
 VIDEO_HEIGHT = 720
 VIDEO_KBPS = 2500
 BBOX = (38.0, 140.5, 40.0, 142.0)  # lat0, lon0, lat1, lon1  (遠野〜石巻の外は外れ値扱い)
@@ -300,8 +301,8 @@ def main() -> None:
             rec["duration"] = it["duration"]
         if it.get("gps_dropped"):
             rec["gps_dropped"] = it["gps_dropped"]
-        if it["id"] in excluded:
-            rec["hidden"] = True  # 選別で除外(サイトに出さない・R2 に上げない)。ファイルは残す
+        if it["id"] in excluded or (it["type"] == "video" and it["duration"] <= MIN_VIDEO_SEC):
+            rec["hidden"] = True  # 選別で除外、または 3 秒以下の動画(サイトに出さない・R2 に上げない)。ファイルは残す
         out.append(rec)
 
     os.makedirs(os.path.dirname(a.json), exist_ok=True)
