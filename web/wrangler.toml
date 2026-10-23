@@ -1,0 +1,4 @@
+# Cloudflare Pages の設定。アカウントは scripts/*.sh の CLOUDFLARE_ACCOUNT_ID で指定(Pages の設定ファイルは account_id を受け付けない)
+name = "kawakudari"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-10-01"

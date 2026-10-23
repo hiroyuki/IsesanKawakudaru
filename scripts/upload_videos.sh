@@ -4,6 +4,7 @@
 # 事前: npx wrangler@3 r2 bucket create kawakudari-media && 公開 URL(r2.dev)を有効化
 set -euo pipefail
 cd "$(dirname "$0")/.."
+export CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-86cffa015396f5c2afcb18680b937800}" # 個人アカウント(hori@p4n.jp)
 MEDIA="${MEDIA:-$(cd .. && pwd)/media}"
 BUCKET="${BUCKET:-kawakudari-media}"
 while [ $# -gt 0 ]; do

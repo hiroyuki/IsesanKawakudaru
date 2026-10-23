@@ -7,6 +7,7 @@
 # 使い方: scripts/deploy.sh [--media /path/to/media] [--project kawakudari]
 set -euo pipefail
 cd "$(dirname "$0")/.."
+export CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-86cffa015396f5c2afcb18680b937800}" # 個人アカウント(hori@p4n.jp)
 MEDIA="${MEDIA:-$(cd .. && pwd)/media}"
 PROJECT="${PROJECT:-kawakudari}"
 while [ $# -gt 0 ]; do
@@ -36,4 +37,4 @@ for sub in ("thumb", "web"):
             n += 1
     print(f"{sub}: {n} files")
 PY
-(cd web && npx --yes wrangler@3 pages deploy dist --project-name "$PROJECT" --commit-dirty=true)
+(cd web && npx --yes wrangler@3 pages deploy dist --project-name "$PROJECT" --branch main --commit-dirty=true)
