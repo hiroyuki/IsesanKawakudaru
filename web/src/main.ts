@@ -254,7 +254,8 @@ function fitTo(items: MediaItem[]) {
   if (items.length === 0) return;
   const b = new maplibregl.LngLatBounds();
   for (const it of items) b.extend([it.lon!, it.lat!]);
-  map.fitBounds(b, { padding: { top: 48, bottom: 40, left: 30, right: 30 }, duration: 700, maxZoom: 15 });
+  // 上はタイトル+フィルタ(約 95px)、下は出典表示・全体ボタンにかぶらない余白
+  map.fitBounds(b, { padding: { top: 120, bottom: 80, left: 36, right: 36 }, duration: 700, maxZoom: 15 });
 }
 
 /** ISO 文字列(JST 固定、例 2017-08-01T06:27:00+09:00)の成分。Date に通すと閲覧者のタイムゾーンに変換されるので使わない */
